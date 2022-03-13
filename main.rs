@@ -6,6 +6,32 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::process::exit;
+use std::path::PathBuf;
+
+const APPNAME: &str = "dedup";
+
+fn default_conf_file() -> Option<PathBuf> {
+    match dirs::config_dir() {
+        Some(dir) => {
+            let mut path = dir;
+            path.push(APPNAME);
+            path.set_extension("ini");
+            Some(path)
+        }
+        None      => {None}
+    }
+}
+fn default_tree_file() -> Option<PathBuf> {
+    match dirs::data_local_dir() {
+        Some(dir) => {
+            let mut path = dir;
+            path.push(APPNAME);
+            path.set_extension("tree");
+            Some(path)
+        }
+        None      => {None}
+    }
+}
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 struct UniqueFile {
@@ -29,7 +55,7 @@ impl Hash for UniqueFile {
 }
 
 fn build_cli() -> Command<'static> {
-    Command::new("dedup")
+    Command::new(APPNAME)
         .subcommand_required(true)
         .subcommand(
             Command::new("completion")
@@ -82,6 +108,11 @@ fn build_cli() -> Command<'static> {
 }
 
 fn main() {
+
+    println!("\n{:?}\n",default_conf_file().unwrap());
+    println!("\n{:?}\n",default_tree_file().unwrap());
+
+
     let matches = build_cli().get_matches();
 
     match matches.subcommand() {

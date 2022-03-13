@@ -12,6 +12,8 @@ clap = "3.1.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap_complete = "3.1.1"
+config = "0.12.0"
+dirs = "4.0"
 
 [[bin]]
 name = "dedup"
