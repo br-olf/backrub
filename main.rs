@@ -1,10 +1,11 @@
-use clap::{AppSettings, Arg, Command, ValueHint};
-use clap_complete::{generate, Generator, Shell};
+use clap::{Arg, Command, ValueHint};
+use clap_complete::{generate, Shell};
 use rb_tree::RBTree;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::io;
+use std::process::exit;
 
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 struct UniqueFile {
@@ -26,23 +27,9 @@ impl Hash for UniqueFile {
         self.hash.hash(state);
     }
 }
-use clap::Parser;
-
-/*
-/// Search for duplicate files and store them in a binary tree.
-#[derive(Parser)]
-struct Cli {
-    /// The file where the tree is stored in
-    #[clap(parse(from_os_str))]
-    tree: std::path::PathBuf,
-    /// The path to the file or directory to find duplicates in
-    #[clap(parse(from_os_str))]
-    path: std::path::PathBuf,
-}
-*/
 
 fn build_cli() -> Command<'static> {
-    Command::new("example")
+    Command::new("dedup")
         .subcommand_required(true)
         .subcommand(
             Command::new("completion")
@@ -71,7 +58,7 @@ fn build_cli() -> Command<'static> {
                 .arg(
                     Arg::new("path")
                         .help("The path results are filtered with")
-                        .value_hint(ValueHint::DirPath)
+                        .value_hint(ValueHint::DirPath),
                 ),
         )
         .subcommand(
@@ -91,39 +78,43 @@ fn build_cli() -> Command<'static> {
                         .value_hint(ValueHint::DirPath)
                         .required(true),
                 ),
-
         )
-}
-fn print_completions<G: Generator>(gen: G, cmd: &mut Command) {
-    generate(gen, cmd, cmd.get_name().to_string(), &mut io::stdout());
 }
 
 fn main() {
     let matches = build_cli().get_matches();
 
-    println!("{:?}", matches);
-
     match matches.subcommand() {
-        Some(("print", s_print)) => { println!("Subcommand print was used") },
-        Some(("analyze", s_ana)) => { println!("Subcommand analyze was used") },
+        Some(("print", s_print)) => {
+            println!("Subcommand print was used");
+            todo!()
+        }
+        Some(("analyze", s_ana)) => {
+            println!("Subcommand analyze was used");
+            todo!()
+        }
         Some(("completion", s_comp)) => {
-            let shell = s_comp.value_of_t::<Shell>("shell").unwrap_or_else(|e| e.exit());
-            let mut cmd = build_cli();
-            print_completions(shell, &mut cmd)
-        },
-        Some((&_, _)) => {},
-        None => {},
+            let shell = s_comp
+                .value_of_t::<Shell>("shell")
+                .unwrap_or_else(|e| e.exit());
+            generate(
+                shell,
+                &mut build_cli(),
+                build_cli().get_name().to_string(),
+                &mut io::stdout(),
+            );
+            exit(0)
+        }
+        Some((&_, _)) => {
+            let _ = build_cli().print_long_help();
+            exit(1)
+        }
+        None => {
+            let _ = build_cli().print_long_help();
+            exit(1)
+        }
     }
 
-    /*
-    if let Ok(generator) = matches.value_of_t::<Shell>("generator") {
-        let mut cmd = build_cli();
-        eprintln!("Generating completion file for {}...", generator);
-        print_completions(generator, &mut cmd);
-
-    }
-     */
-    return;
 
     let mut tree = RBTree::<UniqueFile>::new();
 
