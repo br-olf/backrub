@@ -1,27 +1,28 @@
 use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
-use rb_tree::RBTree;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-//use std::hash::{Hash, Hasher};
-use std::error::Error;
+use std::collections::{BTreeMap, BTreeSet};
+use std::error;
+use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::exit;
 
 const APPNAME: &str = "dedup";
+const TREE_EXTENSION: &str = "tree.json.zip";
+const CONFIG_EXTENSION: &str = "ini";
 
 fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
         Some(dir) => {
             let mut path = dir;
             path.push(APPNAME);
-            path.set_extension("ini");
+            path.set_extension(CONFIG_EXTENSION);
             path
         }
         None => {
             let mut path = PathBuf::from(APPNAME);
-            path.set_extension("ini");
+            path.set_extension(CONFIG_EXTENSION);
             path
         }
     }
@@ -31,30 +32,14 @@ fn default_tree_file() -> PathBuf {
         Some(dir) => {
             let mut path = dir;
             path.push(APPNAME);
-            path.set_extension("tree");
+            path.set_extension(TREE_EXTENSION);
             path
         }
         None => {
             let mut path = PathBuf::from(APPNAME);
-            path.set_extension("tree");
+            path.set_extension(TREE_EXTENSION);
             path
         }
-    }
-}
-
-#[derive(Debug, Eq, Serialize, Deserialize)]
-struct UniqeFileOld {
-    hash: [u8; 32],
-    locations: Vec<String>,
-}
-impl PartialEq for UniqeFileOld {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-    }
-}
-impl PartialOrd for UniqeFileOld {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.hash.partial_cmp(&other.hash)
     }
 }
 
@@ -144,6 +129,7 @@ fn parse_config() {
     }
 }
 
+/*
 fn test_tree_and_balke3() {
     let mut tree = RBTree::<UniqeFileOld>::new();
 
@@ -204,97 +190,149 @@ fn test_tree_and_balke3() {
     assert!(tree.is_subset(&deserialized));
     assert!(tree.is_superset(&deserialized));
 }
+ */
 
-#[derive(Debug, Eq, Serialize, Deserialize)]
-struct FilePath {
-    location: PathBuf,
-    hash: [u8; 32],
-}
-impl PartialEq for FilePath {
-    fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
-    }
-}
-impl PartialOrd for FilePath {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.location.partial_cmp(&other.location)
-    }
-}
-
-#[derive(Debug, Eq, Serialize, Deserialize)]
-struct FileHash {
-    hash: [u8; 32],
-    locations: Vec<PathBuf>,
-}
-impl PartialEq for FileHash {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-    }
-}
-impl PartialOrd for FileHash {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.hash.partial_cmp(&other.hash)
-    }
-}
-
-/// Error type for unknown path in DedupData
+/// Error type for invalid path in DedupData
 #[derive(Debug, Clone)]
-struct UnknownPath;
+struct InvalidPath;
+impl error::Error for InvalidPath {}
+impl fmt::Display for InvalidPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct DedupData {
-    hashtree: RBTree<FileHash>,
-    pathtree: RBTree<FilePath>,
+    hashtree: BTreeMap<[u8; 32], BTreeSet<PathBuf>>,
+    pathtree: BTreeMap<PathBuf, [u8; 32]>,
+}
+
+fn filepath_to_absolute(path: PathBuf) -> Result<PathBuf, Box<dyn error::Error>> {
+    if !path.is_file() {
+        return Err(Box::new(InvalidPath));
+    }
+    Ok(std::fs::canonicalize(path)?)
 }
 
 impl DedupData {
-    fn update(&self, path: PathBuf, hash: [u8; 32]) {
+    fn update(mut self, path: PathBuf, hash: [u8; 32]) -> Result<(), Box<dyn error::Error>> {
+        let location = filepath_to_absolute(path)?;
+
+        match self.pathtree.get_mut(&location) {
+            //File is kown
+            Some(mut_pt_h) => {
+                // File is known but hash has changed
+                if *mut_pt_h != hash {
+                    // Update hashtree
+                    let mut_ht_locations = self.hashtree.get_mut(&mut_pt_h.clone()).unwrap();
+
+                    // File is the only one with that hash
+                    if mut_ht_locations.len() == 1 {
+                        self.hashtree.remove(&mut_pt_h.clone());
+                    }
+                    // File is a duplicate
+                    else {
+                        mut_ht_locations.remove(&location);
+                    }
+
+                    // Update pathree hash
+                    *mut_pt_h = hash;
+                }
+                // File is known and not changed
+                else {
+                }
+            }
+            // File is not known
+            None => {
+                match self.hashtree.get_mut(&hash) {
+                    // File is not known but a duplicate
+                    Some(mut_ht_locations) => {
+                        // Add path to hashtree locations
+                        mut_ht_locations.insert(location.clone());
+                        // Add file to pathtree
+                        self.pathtree.insert(location, hash);
+                    }
+                    // File is not known and no duplicate
+                    None => {
+                        self.pathtree.insert(location.clone(), hash);
+                        self.hashtree.insert(hash, BTreeSet::from([location]));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn delete_path(&mut self, path: PathBuf) -> Result<bool, Box<dyn error::Error>> {
+        let location = filepath_to_absolute(path)?;
+        match self.pathtree.remove(&location) {
+            Some(hash) => {
+                let mut_ht_locations = self.hashtree.get_mut(&hash).unwrap();
+                // File is the only one with that hash
+                if mut_ht_locations.len() == 1 {
+                    self.hashtree.remove(&hash);
+                }
+                // File is a duplicate
+                else {
+                    mut_ht_locations.remove(&location);
+                }
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+    fn delete_path_prefix(
+        &mut self,
+        path: PathBuf,
+    ) -> Result<BTreeSet<PathBuf>, Box<dyn error::Error>> {
+        let path_prefix = std::fs::canonicalize(path)?;
+        let mut deleted = BTreeSet::<PathBuf>::new();
+        for (location, _hash) in &self.pathtree {
+            if location.starts_with(path_prefix.clone()) {
+                deleted.insert(location.clone());
+            }
+        }
+        for location in &deleted {
+            // TODO: Here is space for optimisation
+            self.delete_path(location.clone()).unwrap();
+        }
+        Ok(deleted)
+    }
+
+    fn find_duplicates_by_path(
+        &self,
+        path: PathBuf,
+    ) -> Result<BTreeSet<PathBuf>, Box<dyn std::error::Error>> {
         todo!()
     }
-    fn delete_path(&self, path: PathBuf) -> Result<(), UnknownPath> {
+    fn find_duplicates_by_path_prefix(
+        &self,
+        path_prefix: PathBuf,
+    ) -> Result<BTreeMap<PathBuf, BTreeSet<PathBuf>>, Box<dyn std::error::Error>> {
         todo!()
     }
-    fn delete_path_prefix(&self, path: PathBuf) -> Result<(), UnknownPath> {
-        todo!()
-    }
-    fn find_duplicates_by_path(&self, path: PathBuf) -> Result<Vec<PathBuf>, UnknownPath> {
-        todo!()
-    }
-    fn find_duplicates_by_hash(&self, hash: [u8; 32]) -> Vec<PathBuf> {
-        todo!()
-    }
-    fn get_duplicates(&self) -> Vec<Vec<PathBuf>> {
-        todo!()
+    fn get_duplicates(&self) -> Vec<BTreeSet<PathBuf>> {
+        let mut result = Vec::<BTreeSet<PathBuf>>::new();
+        for (_hash, locations) in &self.hashtree {
+            if locations.len() > 1 {
+                result.push(locations.clone());
+            }
+        }
+        return result;
     }
     fn new() -> DedupData {
-        todo!()
+        DedupData {
+            hashtree: BTreeMap::<[u8; 32], BTreeSet<PathBuf>>::new(),
+            pathtree: BTreeMap::<PathBuf, [u8; 32]>::new(),
+        }
     }
-}
-
-fn test_stuff() {
-    let mut ptree = RBTree::<FilePath>::new();
-    let mut htree = RBTree::<FileHash>::new();
-
-    let fpath = PathBuf::from("/testfile.txt");
-    let fcont = b"foobar and batz";
-
-    let fhash = *blake3::hash(fcont).as_bytes();
-
-    let fh = FileHash {
-        hash: fhash,
-        locations: vec![fpath.clone()],
-    };
-    let fp = FilePath {
-        location: fpath.clone(),
-        hash: fhash,
-    };
-
-    println!("{:?}", fpath.starts_with(fpath.clone()));
 }
 
 fn main() {
-    //parse_config();
+    println!("default conf file location = {:?}", default_conf_file());
+    println!("default tree file location = {:?}", default_tree_file());
 
-    test_stuff();
+    parse_config();
+
     //test_tree_and_balke3();
 }
