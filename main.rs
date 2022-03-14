@@ -4,8 +4,9 @@ use rb_tree::RBTree;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 //use std::hash::{Hash, Hasher};
+use std::error::Error;
 use std::io;
-use std::path::{PathBuf,Path};
+use std::path::{Path, PathBuf};
 use std::process::exit;
 
 const APPNAME: &str = "dedup";
@@ -141,7 +142,6 @@ fn parse_config() {
             exit(1)
         }
     }
-
 }
 
 fn test_tree_and_balke3() {
@@ -201,10 +201,11 @@ fn test_tree_and_balke3() {
 
     let deserialized: RBTree<UniqeFileOld> = serde_json::from_str(&serialized).unwrap();
     println!("deserialized = {:?}", deserialized);
-
+    assert!(tree.is_subset(&deserialized));
+    assert!(tree.is_superset(&deserialized));
 }
 
-#[derive(Debug ,Eq, Serialize, Deserialize)]
+#[derive(Debug, Eq, Serialize, Deserialize)]
 struct FilePath {
     location: PathBuf,
     hash: [u8; 32],
@@ -236,6 +237,10 @@ impl PartialOrd for FileHash {
     }
 }
 
+/// Error type for unknown path in DedupData
+#[derive(Debug, Clone)]
+struct UnknownPath;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct DedupData {
     hashtree: RBTree<FileHash>,
@@ -243,18 +248,30 @@ struct DedupData {
 }
 
 impl DedupData {
-    fn update(&self, path: PathBuf, hash: [u8; 32]){
+    fn update(&self, path: PathBuf, hash: [u8; 32]) {
         todo!()
     }
-    fn delete_path(&self, path: PathBuf) {
+    fn delete_path(&self, path: PathBuf) -> Result<(), UnknownPath> {
         todo!()
     }
-    fn delete_path_prefix(&self, path: PathBuf) {
-
+    fn delete_path_prefix(&self, path: PathBuf) -> Result<(), UnknownPath> {
+        todo!()
+    }
+    fn find_duplicates_by_path(&self, path: PathBuf) -> Result<Vec<PathBuf>, UnknownPath> {
+        todo!()
+    }
+    fn find_duplicates_by_hash(&self, hash: [u8; 32]) -> Vec<PathBuf> {
+        todo!()
+    }
+    fn get_duplicates(&self) -> Vec<Vec<PathBuf>> {
+        todo!()
+    }
+    fn new() -> DedupData {
+        todo!()
     }
 }
 
-fn test_stuff(){
+fn test_stuff() {
     let mut ptree = RBTree::<FilePath>::new();
     let mut htree = RBTree::<FileHash>::new();
 
@@ -263,18 +280,21 @@ fn test_stuff(){
 
     let fhash = *blake3::hash(fcont).as_bytes();
 
-    let fh = FileHash{hash: fhash, locations: vec![fpath.clone()]};
-    let fp = FilePath{location: fpath.clone(), hash: fhash};
+    let fh = FileHash {
+        hash: fhash,
+        locations: vec![fpath.clone()],
+    };
+    let fp = FilePath {
+        location: fpath.clone(),
+        hash: fhash,
+    };
 
-    println!("{:?}",fpath.starts_with(fpath.clone()));
-
-
-
+    println!("{:?}", fpath.starts_with(fpath.clone()));
 }
 
-
-fn main () {
+fn main() {
     //parse_config();
 
     test_stuff();
+    //test_tree_and_balke3();
 }
