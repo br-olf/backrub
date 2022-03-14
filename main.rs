@@ -3,54 +3,57 @@ use clap_complete::{generate, Shell};
 use rb_tree::RBTree;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
+//use std::hash::{Hash, Hasher};
 use std::io;
+use std::path::{PathBuf,Path};
 use std::process::exit;
-use std::path::PathBuf;
 
 const APPNAME: &str = "dedup";
 
-fn default_conf_file() -> Option<PathBuf> {
+fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
         Some(dir) => {
             let mut path = dir;
             path.push(APPNAME);
             path.set_extension("ini");
-            Some(path)
+            path
         }
-        None      => {None}
+        None => {
+            let mut path = PathBuf::from(APPNAME);
+            path.set_extension("ini");
+            path
+        }
     }
 }
-fn default_tree_file() -> Option<PathBuf> {
+fn default_tree_file() -> PathBuf {
     match dirs::data_local_dir() {
         Some(dir) => {
             let mut path = dir;
             path.push(APPNAME);
             path.set_extension("tree");
-            Some(path)
+            path
         }
-        None      => {None}
+        None => {
+            let mut path = PathBuf::from(APPNAME);
+            path.set_extension("tree");
+            path
+        }
     }
 }
 
-#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
-struct UniqueFile {
+#[derive(Debug, Eq, Serialize, Deserialize)]
+struct UniqeFileOld {
     hash: [u8; 32],
     locations: Vec<String>,
 }
-impl PartialEq for UniqueFile {
+impl PartialEq for UniqeFileOld {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
     }
 }
-impl PartialOrd for UniqueFile {
+impl PartialOrd for UniqeFileOld {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.hash.partial_cmp(&other.hash)
-    }
-}
-impl Hash for UniqueFile {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.hash.hash(state);
     }
 }
 
@@ -107,11 +110,8 @@ fn build_cli() -> Command<'static> {
         )
 }
 
-fn main() {
-
-    println!("\n{:?}\n",default_conf_file().unwrap());
-    println!("\n{:?}\n",default_tree_file().unwrap());
-
+fn parse_config() {
+    // TODO Parse config file
 
     let matches = build_cli().get_matches();
 
@@ -136,18 +136,16 @@ fn main() {
             );
             exit(0)
         }
-        Some((&_, _)) => {
-            let _ = build_cli().print_long_help();
-            exit(1)
-        }
-        None => {
+        _ => {
             let _ = build_cli().print_long_help();
             exit(1)
         }
     }
 
+}
 
-    let mut tree = RBTree::<UniqueFile>::new();
+fn test_tree_and_balke3() {
+    let mut tree = RBTree::<UniqeFileOld>::new();
 
     // Hash an input all at once.
     let hash1 = blake3::hash(b"foobarbaz");
@@ -169,20 +167,20 @@ fn main() {
     // Print a hash as hex.
     println!("{}", hash2);
 
-    let test = UniqueFile {
+    let test = UniqeFileOld {
         hash: *hash1.as_bytes(),
         locations: vec!["foo".to_string()],
     };
 
     println!("{:?}", test);
 
-    tree.insert(test.clone());
+    tree.insert(test);
 
-    tree.insert(UniqueFile {
+    tree.insert(UniqeFileOld {
         hash: *blake3::hash(b"bar").as_bytes(),
         locations: vec!["bar".to_string()],
     });
-    tree.insert(UniqueFile {
+    tree.insert(UniqeFileOld {
         hash: *blake3::hash(b"Bier").as_bytes(),
         locations: vec!["Bier".to_string()],
     });
@@ -190,7 +188,7 @@ fn main() {
 
     println!(
         "\n{}",
-        tree.contains(&UniqueFile {
+        tree.contains(&UniqeFileOld {
             hash: *hash1.as_bytes(),
             locations: vec!("lolo".to_string())
         })
@@ -198,14 +196,85 @@ fn main() {
 
     println!("\n\n");
 
-    let serialized = serde_json::to_string(&test).unwrap();
+    let serialized = serde_json::to_string(&tree).unwrap();
     println!("serialized = {}", serialized);
 
-    let deserialized: UniqueFile = serde_json::from_str(&serialized).unwrap();
+    let deserialized: RBTree<UniqeFileOld> = serde_json::from_str(&serialized).unwrap();
     println!("deserialized = {:?}", deserialized);
 
-    println!("\n\n");
+}
 
-    let ss = serde_json::to_string(&tree).unwrap();
-    println!("tree = {}", ss)
+#[derive(Debug ,Eq, Serialize, Deserialize)]
+struct FilePath {
+    location: PathBuf,
+    hash: [u8; 32],
+}
+impl PartialEq for FilePath {
+    fn eq(&self, other: &Self) -> bool {
+        self.location == other.location
+    }
+}
+impl PartialOrd for FilePath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.location.partial_cmp(&other.location)
+    }
+}
+
+#[derive(Debug, Eq, Serialize, Deserialize)]
+struct FileHash {
+    hash: [u8; 32],
+    locations: Vec<PathBuf>,
+}
+impl PartialEq for FileHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+impl PartialOrd for FileHash {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.hash.partial_cmp(&other.hash)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DedupData {
+    hashtree: RBTree<FileHash>,
+    pathtree: RBTree<FilePath>,
+}
+
+impl DedupData {
+    fn update(&self, path: PathBuf, hash: [u8; 32]){
+        todo!()
+    }
+    fn delete_path(&self, path: PathBuf) {
+        todo!()
+    }
+    fn delete_path_prefix(&self, path: PathBuf) {
+
+    }
+}
+
+fn test_stuff(){
+    let mut ptree = RBTree::<FilePath>::new();
+    let mut htree = RBTree::<FileHash>::new();
+
+    let fpath = PathBuf::from("/testfile.txt");
+    let fcont = b"foobar and batz";
+
+    let fhash = *blake3::hash(fcont).as_bytes();
+
+    let fh = FileHash{hash: fhash, locations: vec![fpath.clone()]};
+    let fp = FilePath{location: fpath.clone(), hash: fhash};
+
+    println!("{:?}",fpath.starts_with(fpath.clone()));
+
+
+
+}
+
+
+fn main () {
+    //parse_config();
+
+    test_stuff();
 }
