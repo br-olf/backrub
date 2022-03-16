@@ -2,11 +2,9 @@ use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::error;
-use std::fmt;
-use std::io;
 use std::path::PathBuf;
 use std::process::exit;
+use std::{error, fmt, fs, io};
 
 const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
@@ -41,6 +39,12 @@ fn default_tree_file() -> PathBuf {
             path
         }
     }
+}
+
+const FOLLOW_LINKS: bool = true;
+
+fn traverse_tree(path: PathBuf) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
+    todo!()
 }
 
 fn build_cli() -> Command<'static> {
@@ -123,8 +127,7 @@ fn parse_config() {
             exit(0)
         }
         _ => {
-            let _ = build_cli().print_long_help();
-            exit(1)
+            unreachable!("There should be no unimplemented subcommands")
         }
     }
 }
@@ -328,11 +331,125 @@ impl DedupData {
     }
 }
 
-fn main() {
+fn test_stuff_1() {
     println!("default conf file location = {:?}", default_conf_file());
     println!("default tree file location = {:?}", default_tree_file());
+}
 
-    parse_config();
+fn test_stuff_3() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let vals = vec![
+            String::from("hi"),
+            String::from("from"),
+            String::from("the"),
+            String::from("thread"),
+        ];
+
+        for val in vals {
+            tx.send(val).unwrap();
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+
+    for received in rx {
+        println!("Got: {}", received);
+    }
+}
+/*
+fn test_stuff_4() {
+
+     // cargo.toml:
+     // [dependencies]
+     // crossbeam-channel = "0.5.1"
+
+    use crossbeam_channel::{unbounded, Receiver, Sender};
+    use std::thread::{sleep, spawn};
+    use std::time::Duration;
+
+    fn consumer(thread: i32, request: Sender<bool>, response: Receiver<u64>) {
+        let mut receive_counter = 3;
+        loop {
+            request.send(true).unwrap();
+            let r = response.recv().unwrap();
+            println!("Thread {} received {}", thread, r);
+            receive_counter -= 1;
+            if receive_counter == 0 {
+                println!("Thread {} is done!", thread);
+                break;
+            } else {
+                sleep(Duration::from_secs(r))
+            }
+        }
+    }
+
+    fn producer(mut vec_u64: Vec<u64>, request: Receiver<bool>, response: Sender<u64>) {
+        loop {
+            match request.try_recv() {
+                Ok(_) => {
+                    let send_val = vec_u64.swap_remove(0);
+                    response.send(send_val).unwrap();
+                    if vec_u64.len() == 0 {
+                        println!("Finishing producing");
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let (tx1, rx1) = unbounded();
+    let (tx2, rx2) = unbounded();
+    for i in 0..3 {
+        let tx1 = tx1.clone();
+        let rx2 = rx2.clone();
+        spawn(move || consumer(i, tx1, rx2));
+    }
+    let vec_int: Vec<u64> = vec![3, 1, 2, 2, 1, 3, 4, 4, 2];
+    spawn(move || producer(vec_int, rx1, tx2));
+    loop {}
+}
+ */
+
+
+
+fn test_stuff_2() {
+    use walkdir::WalkDir;
+    use std::time::{Duration, Instant};
+    let mut v = Vec::<PathBuf>::new();
+    let start = Instant::now();
+    for file in WalkDir::new("/home/").follow_links(false).into_iter().filter_map(|f| f.ok()) {
+        if file.metadata().unwrap().is_file() {
+            v.push(file.path().to_path_buf());
+        }
+    }
+    let duration = start.elapsed();
+    println!("{:?}\n", v);
+    println!("\nTook {:?}", duration);
+}
+
+fn test_stuff_5() {
+    use rayon::prelude::*;
+    use std::sync::mpsc::channel;
+
+    let (sender, receiver) = channel();
+    let v: Vec<u32> = (0..50).collect();
+    v.into_par_iter().for_each_with(sender, |s, x| s.send((x, *blake3::hash(&x.to_ne_bytes()).as_bytes())).unwrap());
+
+    let mut res: Vec<_> = receiver.iter().collect();
+
+    println!("{:?}", res);
+}
+
+fn main() {
+    test_stuff_5();
+//    parse_config();
 
     //test_tree_and_balke3();
 }

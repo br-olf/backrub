@@ -2,7 +2,7 @@
 name = "dedup"
 version = "0.1.0"
 edition = "2021"
-
+licence = "EUPL-1.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -13,7 +13,9 @@ serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 configparser = "3.0.0"
 dirs = "4.0.0"
-flate2= { version = "1.0.22", features = ["rust_backend"] }
+flate2 = { version = "1.0.22", features = ["rust_backend"] }
+walkdir = "2.3.2"
+rayon = "1.5.1"
 
 
 [[bin]]
