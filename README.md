@@ -1,4 +1,4 @@
-#dedup
+# dedup
 
 A Rust project to find duplicates in a filesystem.
 
