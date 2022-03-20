@@ -2,9 +2,10 @@ use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::{error, fmt, fs, io};
+use walkdir::WalkDir;
 
 const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
@@ -417,14 +418,16 @@ fn test_stuff_4() {
 }
  */
 
-
-
 fn test_stuff_2() {
-    use walkdir::WalkDir;
     use std::time::{Duration, Instant};
+    use walkdir::WalkDir;
     let mut v = Vec::<PathBuf>::new();
     let start = Instant::now();
-    for file in WalkDir::new("/home/").follow_links(false).into_iter().filter_map(|f| f.ok()) {
+    for file in WalkDir::new(".")
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|f| f.ok())
+    {
         if file.metadata().unwrap().is_file() {
             v.push(file.path().to_path_buf());
         }
@@ -440,16 +443,117 @@ fn test_stuff_5() {
 
     let (sender, receiver) = channel();
     let v: Vec<u32> = (0..50).collect();
-    v.into_par_iter().for_each_with(sender, |s, x| s.send((x, *blake3::hash(&x.to_ne_bytes()).as_bytes())).unwrap());
+    v.into_par_iter().for_each_with(sender, |s, x| {
+        s.send((x, *blake3::hash(&x.to_ne_bytes()).as_bytes()))
+            .unwrap()
+    });
 
     let mut res: Vec<_> = receiver.iter().collect();
 
     println!("{:?}", res);
 }
 
+fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
+    let dir_path = fs::canonicalize(path)?;
+    if dir_path.is_file() {
+        return Ok(vec![dir_path]);
+    }
+    if !dir_path.is_dir() {
+        return Err(Box::new(InvalidPath));
+    }
+
+    let mut result = Vec::<PathBuf>::new();
+    for file in WalkDir::new(dir_path)
+        .follow_links(FOLLOW_LINKS)
+        .into_iter()
+        .filter_map(|f| f.ok())
+    {
+        if file.metadata().unwrap().is_file() {
+            result.push(file.path().to_path_buf());
+        }
+    }
+    Ok(result)
+}
+
+#[derive(Debug)]
+struct MultipleIoErrors {
+    errors: Vec<(PathBuf, std::io::Error)>,
+}
+impl error::Error for MultipleIoErrors {}
+impl fmt::Display for MultipleIoErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (p, e) in &self.errors {
+            writeln!(f, "{}: {}", p.display(), e)?
+        }
+        Ok(())
+    }
+}
+
+fn calculate_file_hashes(
+    files: Vec<PathBuf>,
+) -> Result<BTreeMap<PathBuf, [u8; 32]>, Box<dyn error::Error>> {
+    use rayon::prelude::*;
+    use std::sync::mpsc::channel;
+
+    let (sender, receiver) = channel();
+    files
+        .into_par_iter()
+        .try_for_each_with(sender, |s, file| match fs::read(file.clone()) {
+            Ok(content) => s.send((file, Ok(*blake3::hash(&content).as_bytes()))),
+            Err(e) => s.send((file, Err(e))),
+        })?;
+
+    let collected_data: Vec<(PathBuf, Result<[u8; 32], std::io::Error>)> =
+        receiver.iter().collect();
+
+    let mut data = BTreeMap::<PathBuf, [u8; 32]>::new();
+    let mut errors = MultipleIoErrors {
+        errors: Vec::<(PathBuf, std::io::Error)>::new(),
+    };
+    let mut has_errors: bool = false;
+
+    for (path, res) in collected_data {
+        match res {
+            Ok(hash) => {
+                data.insert(path, hash);
+            }
+            Err(err) => {
+                errors.errors.push((path, err));
+                has_errors = true;
+            }
+        }
+    }
+    if has_errors {
+        Err(Box::new(errors))
+    } else {
+        Ok(data)
+    }
+}
+
 fn main() {
-    test_stuff_5();
-//    parse_config();
+    let crash: bool = true;
+    if crash {
+        match crawl_dir(&".") {
+            Err(e) => {
+                println!("crawl_dir Error: {}", e)
+            }
+            Ok(files) => {
+                println!("SUCESS: crawl_dir");
+                match calculate_file_hashes(files) {
+                    Err(e) => {
+                        print!("calculate_file_hashes Error:\n{}", e)
+                    }
+                    Ok(ht) => {
+                        print!("Success, hashed {} files", ht.len())
+                    }
+                }
+            }
+        }
+    } else {
+        println!("{:?}", calculate_file_hashes(crawl_dir(&".").unwrap()))
+    }
+    //
+    //    parse_config();
 
     //test_tree_and_balke3();
 }
