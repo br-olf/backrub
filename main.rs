@@ -13,7 +13,6 @@ const TREE_EXTENSION: &str = "tree.json.zip";
 const CONFIG_EXTENSION: &str = "ini";
 const FOLLOW_LINKS: bool = true;
 
-
 fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
         Some(dir) => {
@@ -135,9 +134,6 @@ fn parse_config() {
     }
 }
 
-
-
-
 #[allow(dead_code)]
 fn test_stuff_3() {
     use std::sync::mpsc;
@@ -202,9 +198,6 @@ fn test_stuff_5() {
     println!("{:?}", res);
 }
 
-
-
-
 /// Error type for invalid path in DedupData
 #[derive(Debug, Clone)]
 struct InvalidPath;
@@ -229,14 +222,16 @@ impl fmt::Display for MultipleIoErrors {
     }
 }
 
-
-fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
+fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, std::io::Error> {
     let dir_path = fs::canonicalize(path)?;
     if dir_path.is_file() {
         return Ok(vec![dir_path]);
     }
     if !dir_path.is_dir() {
-        return Err(Box::new(InvalidPath));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "crawl_dir is expecting a file or directory",
+        ));
     }
 
     let mut result = Vec::<PathBuf>::new();
