@@ -1,7 +1,8 @@
 use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use log::{error, info, warn};
+//use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::{error, fmt, fs, io};
@@ -10,6 +11,8 @@ use walkdir::WalkDir;
 const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
 const CONFIG_EXTENSION: &str = "ini";
+const FOLLOW_LINKS: bool = true;
+
 
 fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
@@ -40,12 +43,6 @@ fn default_tree_file() -> PathBuf {
             path
         }
     }
-}
-
-const FOLLOW_LINKS: bool = true;
-
-fn traverse_tree(path: PathBuf) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
-    todo!()
 }
 
 fn build_cli() -> Command<'static> {
@@ -101,18 +98,23 @@ fn build_cli() -> Command<'static> {
         )
 }
 
+#[allow(unreachable_code)]
 fn parse_config() {
     // TODO Parse config file
+    todo!("Config and command line parsing is not implemented!");
+
+    println!("Would read {}", default_conf_file().display());
+    println!("Would save to {}", default_tree_file().display());
 
     let matches = build_cli().get_matches();
 
     match matches.subcommand() {
         Some(("print", s_print)) => {
-            println!("Subcommand print was used");
+            println!("Subcommand print was used: {:?}", s_print);
             todo!()
         }
         Some(("analyze", s_ana)) => {
-            println!("Subcommand analyze was used");
+            println!("Subcommand analyze was used: {:?}", s_ana);
             todo!()
         }
         Some(("completion", s_comp)) => {
@@ -133,210 +135,10 @@ fn parse_config() {
     }
 }
 
-/*
-fn test_tree_and_balke3() {
-    let mut tree = RBTree::<UniqeFileOld>::new();
 
-    // Hash an input all at once.
-    let hash1 = blake3::hash(b"foobarbaz");
 
-    // Hash an input incrementally.
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"foo");
-    hasher.update(b"bar");
-    hasher.update(b"baz");
-    let hash2 = hasher.finalize();
-    assert_eq!(hash1, hash2);
 
-    // Extended output. OutputReader also implements Read and Seek.
-    let mut output = [0; 1000];
-    let mut output_reader = hasher.finalize_xof();
-    output_reader.fill(&mut output);
-    assert_eq!(&output[..32], hash1.as_bytes());
-
-    // Print a hash as hex.
-    println!("{}", hash2);
-
-    let test = UniqeFileOld {
-        hash: *hash1.as_bytes(),
-        locations: vec!["foo".to_string()],
-    };
-
-    println!("{:?}", test);
-
-    tree.insert(test);
-
-    tree.insert(UniqeFileOld {
-        hash: *blake3::hash(b"bar").as_bytes(),
-        locations: vec!["bar".to_string()],
-    });
-    tree.insert(UniqeFileOld {
-        hash: *blake3::hash(b"Bier").as_bytes(),
-        locations: vec!["Bier".to_string()],
-    });
-    println!("\n{:?}", tree);
-
-    println!(
-        "\n{}",
-        tree.contains(&UniqeFileOld {
-            hash: *hash1.as_bytes(),
-            locations: vec!("lolo".to_string())
-        })
-    );
-
-    println!("\n\n");
-
-    let serialized = serde_json::to_string(&tree).unwrap();
-    println!("serialized = {}", serialized);
-
-    let deserialized: RBTree<UniqeFileOld> = serde_json::from_str(&serialized).unwrap();
-    println!("deserialized = {:?}", deserialized);
-    assert!(tree.is_subset(&deserialized));
-    assert!(tree.is_superset(&deserialized));
-}
- */
-
-/// Error type for invalid path in DedupData
-#[derive(Debug, Clone)]
-struct InvalidPath;
-impl error::Error for InvalidPath {}
-impl fmt::Display for InvalidPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DedupData {
-    hashtree: BTreeMap<[u8; 32], BTreeSet<PathBuf>>,
-    pathtree: BTreeMap<PathBuf, [u8; 32]>,
-}
-
-fn filepath_to_absolute(path: PathBuf) -> Result<PathBuf, Box<dyn error::Error>> {
-    if !path.is_file() {
-        return Err(Box::new(InvalidPath));
-    }
-    Ok(std::fs::canonicalize(path)?)
-}
-
-impl DedupData {
-    fn update(mut self, path: PathBuf, hash: [u8; 32]) -> Result<(), Box<dyn error::Error>> {
-        let location = filepath_to_absolute(path)?;
-
-        match self.pathtree.get_mut(&location) {
-            //File is kown
-            Some(mut_pt_h) => {
-                // File is known but hash has changed
-                if *mut_pt_h != hash {
-                    // Update hashtree
-                    let mut_ht_locations = self.hashtree.get_mut(&mut_pt_h.clone()).unwrap();
-
-                    // File is the only one with that hash
-                    if mut_ht_locations.len() == 1 {
-                        self.hashtree.remove(&mut_pt_h.clone());
-                    }
-                    // File is a duplicate
-                    else {
-                        mut_ht_locations.remove(&location);
-                    }
-
-                    // Update pathree hash
-                    *mut_pt_h = hash;
-                }
-                // File is known and not changed
-                else {
-                }
-            }
-            // File is not known
-            None => {
-                match self.hashtree.get_mut(&hash) {
-                    // File is not known but a duplicate
-                    Some(mut_ht_locations) => {
-                        // Add path to hashtree locations
-                        mut_ht_locations.insert(location.clone());
-                        // Add file to pathtree
-                        self.pathtree.insert(location, hash);
-                    }
-                    // File is not known and no duplicate
-                    None => {
-                        self.pathtree.insert(location.clone(), hash);
-                        self.hashtree.insert(hash, BTreeSet::from([location]));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-    fn delete_path(&mut self, path: PathBuf) -> Result<bool, Box<dyn error::Error>> {
-        let location = filepath_to_absolute(path)?;
-        match self.pathtree.remove(&location) {
-            Some(hash) => {
-                let mut_ht_locations = self.hashtree.get_mut(&hash).unwrap();
-                // File is the only one with that hash
-                if mut_ht_locations.len() == 1 {
-                    self.hashtree.remove(&hash);
-                }
-                // File is a duplicate
-                else {
-                    mut_ht_locations.remove(&location);
-                }
-                Ok(true)
-            }
-            None => Ok(false),
-        }
-    }
-    fn delete_path_prefix(
-        &mut self,
-        path: PathBuf,
-    ) -> Result<BTreeSet<PathBuf>, Box<dyn error::Error>> {
-        let path_prefix = std::fs::canonicalize(path)?;
-        let mut deleted = BTreeSet::<PathBuf>::new();
-        for (location, _hash) in &self.pathtree {
-            if location.starts_with(path_prefix.clone()) {
-                deleted.insert(location.clone());
-            }
-        }
-        for location in &deleted {
-            // TODO: Here is space for optimisation
-            self.delete_path(location.clone()).unwrap();
-        }
-        Ok(deleted)
-    }
-
-    fn find_duplicates_by_path(
-        &self,
-        path: PathBuf,
-    ) -> Result<BTreeSet<PathBuf>, Box<dyn std::error::Error>> {
-        todo!()
-    }
-    fn find_duplicates_by_path_prefix(
-        &self,
-        path_prefix: PathBuf,
-    ) -> Result<BTreeMap<PathBuf, BTreeSet<PathBuf>>, Box<dyn std::error::Error>> {
-        todo!()
-    }
-    fn get_duplicates(&self) -> Vec<BTreeSet<PathBuf>> {
-        let mut result = Vec::<BTreeSet<PathBuf>>::new();
-        for (_hash, locations) in &self.hashtree {
-            if locations.len() > 1 {
-                result.push(locations.clone());
-            }
-        }
-        return result;
-    }
-    fn new() -> DedupData {
-        DedupData {
-            hashtree: BTreeMap::<[u8; 32], BTreeSet<PathBuf>>::new(),
-            pathtree: BTreeMap::<PathBuf, [u8; 32]>::new(),
-        }
-    }
-}
-
-fn test_stuff_1() {
-    println!("default conf file location = {:?}", default_conf_file());
-    println!("default tree file location = {:?}", default_tree_file());
-}
-
+#[allow(dead_code)]
 fn test_stuff_3() {
     use std::sync::mpsc;
     use std::thread;
@@ -362,65 +164,11 @@ fn test_stuff_3() {
         println!("Got: {}", received);
     }
 }
-/*
-fn test_stuff_4() {
 
-     // cargo.toml:
-     // [dependencies]
-     // crossbeam-channel = "0.5.1"
-
-    use crossbeam_channel::{unbounded, Receiver, Sender};
-    use std::thread::{sleep, spawn};
-    use std::time::Duration;
-
-    fn consumer(thread: i32, request: Sender<bool>, response: Receiver<u64>) {
-        let mut receive_counter = 3;
-        loop {
-            request.send(true).unwrap();
-            let r = response.recv().unwrap();
-            println!("Thread {} received {}", thread, r);
-            receive_counter -= 1;
-            if receive_counter == 0 {
-                println!("Thread {} is done!", thread);
-                break;
-            } else {
-                sleep(Duration::from_secs(r))
-            }
-        }
-    }
-
-    fn producer(mut vec_u64: Vec<u64>, request: Receiver<bool>, response: Sender<u64>) {
-        loop {
-            match request.try_recv() {
-                Ok(_) => {
-                    let send_val = vec_u64.swap_remove(0);
-                    response.send(send_val).unwrap();
-                    if vec_u64.len() == 0 {
-                        println!("Finishing producing");
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let (tx1, rx1) = unbounded();
-    let (tx2, rx2) = unbounded();
-    for i in 0..3 {
-        let tx1 = tx1.clone();
-        let rx2 = rx2.clone();
-        spawn(move || consumer(i, tx1, rx2));
-    }
-    let vec_int: Vec<u64> = vec![3, 1, 2, 2, 1, 3, 4, 4, 2];
-    spawn(move || producer(vec_int, rx1, tx2));
-    loop {}
-}
- */
-
+#[allow(dead_code)]
 fn test_stuff_2() {
+    #[allow(unused_imports)]
     use std::time::{Duration, Instant};
-    use walkdir::WalkDir;
     let mut v = Vec::<PathBuf>::new();
     let start = Instant::now();
     for file in WalkDir::new(".")
@@ -437,6 +185,7 @@ fn test_stuff_2() {
     println!("\nTook {:?}", duration);
 }
 
+#[allow(dead_code)]
 fn test_stuff_5() {
     use rayon::prelude::*;
     use std::sync::mpsc::channel;
@@ -448,10 +197,38 @@ fn test_stuff_5() {
             .unwrap()
     });
 
-    let mut res: Vec<_> = receiver.iter().collect();
+    let res: Vec<_> = receiver.iter().collect();
 
     println!("{:?}", res);
 }
+
+
+
+
+/// Error type for invalid path in DedupData
+#[derive(Debug, Clone)]
+struct InvalidPath;
+impl error::Error for InvalidPath {}
+impl fmt::Display for InvalidPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+#[derive(Debug)]
+struct MultipleIoErrors {
+    errors: Vec<(PathBuf, std::io::Error)>,
+}
+impl error::Error for MultipleIoErrors {}
+impl fmt::Display for MultipleIoErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (p, e) in &self.errors {
+            write!(f, "\n{}: {}", p.display(), e)?
+        }
+        Ok(())
+    }
+}
+
 
 fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
     let dir_path = fs::canonicalize(path)?;
@@ -475,27 +252,18 @@ fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, Box<dyn error::Erro
     Ok(result)
 }
 
-#[derive(Debug)]
-struct MultipleIoErrors {
-    errors: Vec<(PathBuf, std::io::Error)>,
-}
-impl error::Error for MultipleIoErrors {}
-impl fmt::Display for MultipleIoErrors {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (p, e) in &self.errors {
-            writeln!(f, "{}: {}", p.display(), e)?
-        }
-        Ok(())
-    }
-}
-
 fn calculate_file_hashes(
     files: Vec<PathBuf>,
-) -> Result<BTreeMap<PathBuf, [u8; 32]>, Box<dyn error::Error>> {
+) -> Result<
+    Vec<(PathBuf, Result<[u8; 32], std::io::Error>)>,
+    std::sync::mpsc::SendError<(PathBuf, Result<[u8; 32], std::io::Error>)>,
+> {
+    //Result<BTreeMap<PathBuf, [u8; 32]>, Box<dyn error::Error>> {
     use rayon::prelude::*;
     use std::sync::mpsc::channel;
 
     let (sender, receiver) = channel();
+
     files
         .into_par_iter()
         .try_for_each_with(sender, |s, file| match fs::read(file.clone()) {
@@ -503,16 +271,19 @@ fn calculate_file_hashes(
             Err(e) => s.send((file, Err(e))),
         })?;
 
-    let collected_data: Vec<(PathBuf, Result<[u8; 32], std::io::Error>)> =
-        receiver.iter().collect();
+    Ok(receiver.iter().collect())
+}
 
+fn create_file_hash_tree(
+    hash_results: Vec<(PathBuf, Result<[u8; 32], std::io::Error>)>,
+) -> (BTreeMap<PathBuf, [u8; 32]>, Option<MultipleIoErrors>) {
     let mut data = BTreeMap::<PathBuf, [u8; 32]>::new();
     let mut errors = MultipleIoErrors {
         errors: Vec::<(PathBuf, std::io::Error)>::new(),
     };
     let mut has_errors: bool = false;
 
-    for (path, res) in collected_data {
+    for (path, res) in hash_results {
         match res {
             Ok(hash) => {
                 data.insert(path, hash);
@@ -524,36 +295,37 @@ fn calculate_file_hashes(
         }
     }
     if has_errors {
-        Err(Box::new(errors))
+        (data, Some(errors))
     } else {
-        Ok(data)
+        (data, None)
     }
 }
 
 fn main() {
-    let crash: bool = true;
-    if crash {
-        match crawl_dir(&".") {
-            Err(e) => {
-                println!("crawl_dir Error: {}", e)
-            }
-            Ok(files) => {
-                println!("SUCESS: crawl_dir");
-                match calculate_file_hashes(files) {
-                    Err(e) => {
-                        print!("calculate_file_hashes Error:\n{}", e)
-                    }
-                    Ok(ht) => {
-                        print!("Success, hashed {} files", ht.len())
-                    }
-                }
-            }
-        }
-    } else {
-        println!("{:?}", calculate_file_hashes(crawl_dir(&".").unwrap()))
-    }
-    //
-    //    parse_config();
+    env_logger::init();
 
-    //test_tree_and_balke3();
+    match crawl_dir(&".") {
+        Err(e) => {
+            error!("crawl_dir FAILED: {}", e);
+        }
+        Ok(files) => match calculate_file_hashes(files) {
+            Err(e) => {
+                error!("calculate_file_hashes FAILED:{}", e);
+            }
+            Ok(hash_vec) => {
+                let (data, errors) = create_file_hash_tree(hash_vec);
+                if let Some(e) = errors {
+                    warn!(
+                        "create_file_hash_tree returned {} errors: {}",
+                        e.errors.len(),
+                        e
+                    );
+                }
+                info!("create_file_hash_tree returned {} elements", data.len());
+            }
+        },
+    }
+
+    println!();
+    parse_config();
 }
