@@ -198,15 +198,8 @@ fn test_stuff_5() {
     println!("{:?}", res);
 }
 
-/// Error type for invalid path in DedupData
-#[derive(Debug, Clone)]
-struct InvalidPath;
-impl error::Error for InvalidPath {}
-impl fmt::Display for InvalidPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
-    }
-}
+
+
 
 #[derive(Debug)]
 struct MultipleIoErrors {
@@ -253,7 +246,6 @@ fn calculate_file_hashes(
     Vec<(PathBuf, Result<[u8; 32], std::io::Error>)>,
     std::sync::mpsc::SendError<(PathBuf, Result<[u8; 32], std::io::Error>)>,
 > {
-    //Result<BTreeMap<PathBuf, [u8; 32]>, Box<dyn error::Error>> {
     use rayon::prelude::*;
     use std::sync::mpsc::channel;
 
