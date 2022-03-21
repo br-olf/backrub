@@ -134,76 +134,12 @@ fn parse_config() {
     }
 }
 
-#[allow(dead_code)]
-fn test_stuff_3() {
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::Duration;
-
-    let (tx, rx) = mpsc::channel();
-
-    thread::spawn(move || {
-        let vals = vec![
-            String::from("hi"),
-            String::from("from"),
-            String::from("the"),
-            String::from("thread"),
-        ];
-
-        for val in vals {
-            tx.send(val).unwrap();
-            thread::sleep(Duration::from_secs(1));
-        }
-    });
-
-    for received in rx {
-        println!("Got: {}", received);
-    }
-}
-
-#[allow(dead_code)]
-fn test_stuff_2() {
-    #[allow(unused_imports)]
-    use std::time::{Duration, Instant};
-    let mut v = Vec::<PathBuf>::new();
-    let start = Instant::now();
-    for file in WalkDir::new(".")
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|f| f.ok())
-    {
-        if file.metadata().unwrap().is_file() {
-            v.push(file.path().to_path_buf());
-        }
-    }
-    let duration = start.elapsed();
-    println!("{:?}\n", v);
-    println!("\nTook {:?}", duration);
-}
-
-#[allow(dead_code)]
-fn test_stuff_5() {
-    use rayon::prelude::*;
-    use std::sync::mpsc::channel;
-
-    let (sender, receiver) = channel();
-    let v: Vec<u32> = (0..50).collect();
-    v.into_par_iter().for_each_with(sender, |s, x| {
-        s.send((x, *blake3::hash(&x.to_ne_bytes()).as_bytes()))
-            .unwrap()
-    });
-
-    let res: Vec<_> = receiver.iter().collect();
-
-    println!("{:?}", res);
-}
-
 
 
 
 #[derive(Debug)]
 struct MultipleIoErrors {
-    errors: Vec<(PathBuf, std::io::Error)>,
+    errors: Vec<(PathBuf, io::Error)>,
 }
 impl error::Error for MultipleIoErrors {}
 impl fmt::Display for MultipleIoErrors {
@@ -215,14 +151,14 @@ impl fmt::Display for MultipleIoErrors {
     }
 }
 
-fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, std::io::Error> {
+fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, io::Error> {
     let dir_path = fs::canonicalize(path)?;
     if dir_path.is_file() {
         return Ok(vec![dir_path]);
     }
     if !dir_path.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
             "crawl_dir is expecting a file or directory",
         ));
     }
@@ -243,8 +179,8 @@ fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, std::io::Error> {
 fn calculate_file_hashes(
     files: Vec<PathBuf>,
 ) -> Result<
-    Vec<(PathBuf, Result<[u8; 32], std::io::Error>)>,
-    std::sync::mpsc::SendError<(PathBuf, Result<[u8; 32], std::io::Error>)>,
+    Vec<(PathBuf, Result<[u8; 32], io::Error>)>,
+    std::sync::mpsc::SendError<(PathBuf, Result<[u8; 32], io::Error>)>,
 > {
     use rayon::prelude::*;
     use std::sync::mpsc::channel;
@@ -262,11 +198,11 @@ fn calculate_file_hashes(
 }
 
 fn create_file_hash_tree(
-    hash_results: Vec<(PathBuf, Result<[u8; 32], std::io::Error>)>,
+    hash_results: Vec<(PathBuf, Result<[u8; 32], io::Error>)>,
 ) -> (BTreeMap<PathBuf, [u8; 32]>, Option<MultipleIoErrors>) {
     let mut data = BTreeMap::<PathBuf, [u8; 32]>::new();
     let mut errors = MultipleIoErrors {
-        errors: Vec::<(PathBuf, std::io::Error)>::new(),
+        errors: Vec::<(PathBuf, io::Error)>::new(),
     };
     let mut has_errors: bool = false;
 
