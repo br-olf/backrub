@@ -134,9 +134,6 @@ fn parse_config() {
     }
 }
 
-
-
-
 #[derive(Debug)]
 struct MultipleIoErrors {
     errors: Vec<(PathBuf, io::Error)>,
@@ -176,25 +173,20 @@ fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, io::Error> {
     Ok(result)
 }
 
-fn calculate_file_hashes(
-    files: Vec<PathBuf>,
-) -> Result<
-    Vec<(PathBuf, Result<[u8; 32], io::Error>)>,
-    std::sync::mpsc::SendError<(PathBuf, Result<[u8; 32], io::Error>)>,
-> {
+fn calculate_file_hashes(files: Vec<PathBuf>) -> Vec<(PathBuf, Result<[u8; 32], io::Error>)> {
     use rayon::prelude::*;
-    use std::sync::mpsc::channel;
 
-    let (sender, receiver) = channel();
-
+    let (sender, receiver) = std::sync::mpsc::channel();
     files
         .into_par_iter()
-        .try_for_each_with(sender, |s, file| match fs::read(file.clone()) {
-            Ok(content) => s.send((file, Ok(*blake3::hash(&content).as_bytes()))),
-            Err(e) => s.send((file, Err(e))),
-        })?;
+        .for_each_with(sender, |s, file| match fs::read(file.clone()) {
+            Ok(content) => s
+                .send((file, Ok(*blake3::hash(&content).as_bytes())))
+                .unwrap(),
+            Err(e) => s.send((file, Err(e))).unwrap(),
+        });
 
-    Ok(receiver.iter().collect())
+    receiver.iter().collect()
 }
 
 fn create_file_hash_tree(
@@ -231,22 +223,18 @@ fn main() {
         Err(e) => {
             error!("crawl_dir FAILED: {}", e);
         }
-        Ok(files) => match calculate_file_hashes(files) {
-            Err(e) => {
-                error!("calculate_file_hashes FAILED:{}", e);
+        Ok(files) => {
+            let hash_vec = calculate_file_hashes(files);
+            let (data, errors) = create_file_hash_tree(hash_vec);
+            if let Some(e) = errors {
+                warn!(
+                    "create_file_hash_tree returned {} errors: {}",
+                    e.errors.len(),
+                    e
+                );
             }
-            Ok(hash_vec) => {
-                let (data, errors) = create_file_hash_tree(hash_vec);
-                if let Some(e) = errors {
-                    warn!(
-                        "create_file_hash_tree returned {} errors: {}",
-                        e.errors.len(),
-                        e
-                    );
-                }
-                info!("create_file_hash_tree returned {} elements", data.len());
-            }
-        },
+            info!("create_file_hash_tree returned {} elements", data.len());
+        }
     }
 
     println!();
