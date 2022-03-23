@@ -18,7 +18,3 @@ walkdir = "2.3.2"
 rayon = "1.5.1"
 log = "0.4.14"
 env_logger = "0.9.0"
-
-[[bin]]
-name = "dedup"
-path = "main.rs"
