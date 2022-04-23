@@ -11,6 +11,8 @@ const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
 const CONFIG_EXTENSION: &str = "ini";
 
+static INI_TEMPLATE: &'static str = include_str!("dedup-template.ini");
+
 fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
         Some(dir) => {
@@ -97,6 +99,16 @@ fn build_cli() -> Command<'static> {
 
 #[allow(unreachable_code)]
 fn parse_config() {
+    let config_file: PathBuf;
+    let config_file_env = std::env::var("DEDUP_CONFIG_PATH");
+    if config_file_env.is_err(){
+        config_file = default_conf_file();
+    }
+    else {
+        config_file = std::path::Path::new(&config_file_env.unwrap()).to_path_buf();
+    }
+
+
     // TODO Parse config file
     todo!("Config and command line parsing is not implemented!");
 
@@ -149,5 +161,5 @@ fn main() {
     }
 
     println!();
-    parse_config();
+ //   parse_config();
 }
