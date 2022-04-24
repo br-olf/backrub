@@ -1,4 +1,4 @@
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
 use log::{error, info, warn};
@@ -11,7 +11,7 @@ const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
 const CONFIG_EXTENSION: &str = "ini";
 
-static INI_TEMPLATE: &'static str = include_str!("dedup-template.ini");
+// static INI_TEMPLATE: &'static str = include_str!("dedup-template.ini");
 
 fn default_conf_file() -> PathBuf {
     match dirs::config_dir() {
@@ -28,6 +28,7 @@ fn default_conf_file() -> PathBuf {
         }
     }
 }
+
 fn default_tree_file() -> PathBuf {
     match dirs::data_local_dir() {
         Some(dir) => {
@@ -44,13 +45,26 @@ fn default_tree_file() -> PathBuf {
     }
 }
 
+struct Config {
+    treeFilePath: PathBuf,
+    followSymlinks: bool,
+}
+
 fn build_cli() -> Command<'static> {
     Command::new(APPNAME)
         .subcommand_required(true)
         .subcommand(
+            Command::new("config")
+                .long_flag("config")
+                .short_flag('c')
+                .about("Change or print the configuration")
+                //.arg(
+                //    todo!("Todo");
+                //),
+        )
+        .subcommand(
             Command::new("completion")
                 .long_flag("completion")
-                .short_flag('c')
                 .about("Print shell completions")
                 .arg(
                     Arg::new("shell")
@@ -99,15 +113,32 @@ fn build_cli() -> Command<'static> {
 
 #[allow(unreachable_code)]
 fn parse_config() {
-    let config_file: PathBuf;
-    let config_file_env = std::env::var("DEDUP_CONFIG_PATH");
-    if config_file_env.is_err(){
-        config_file = default_conf_file();
+    let config_file_path: PathBuf;
+    let config_file_path_env = std::env::var("DEDUP_CONFIG_PATH");
+    if config_file_path_env.is_err(){
+        config_file_path = default_conf_file();
     }
     else {
-        config_file = std::path::Path::new(&config_file_env.unwrap()).to_path_buf();
+        config_file_path = Path::new(&config_file_path_env.unwrap()).to_path_buf();
     }
 
+    let config = Config::new();
+    if config_file_path.exists() {
+        match std::fs::read_to_string(config_file_path) {
+            Ok(config_file) => {
+                let ini = configparser::ini::Ini::new();
+                ini.read(config_file);
+            }
+            Err(e) => {
+                error!("Could not read cofig file {}:\n{}", config_file_path.display(), e);
+                exit(1);
+            }
+        }
+
+    }
+    else {
+        todo!("Load and save default config file")
+    }
 
     // TODO Parse config file
     todo!("Config and command line parsing is not implemented!");
@@ -146,7 +177,7 @@ fn parse_config() {
 fn main() {
     env_logger::init();
 
-    match crawl_dir(&".") {
+    match crawl_dir(&".", false) {
         Err(e) => {
             error!("crawl_dir FAILED: {}", e);
         }

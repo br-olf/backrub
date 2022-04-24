@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 use std::{error, fmt, fs, io};
 use walkdir::WalkDir;
 
-const FOLLOW_LINKS: bool = true;
-
 #[derive(Debug)]
 pub struct MultipleIoErrors {
     errors: Vec<(PathBuf, io::Error)>,
@@ -24,7 +22,7 @@ impl MultipleIoErrors {
     }
 }
 
-pub fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, io::Error> {
+pub fn crawl_dir(path: &dyn AsRef<Path>, follow_links: bool) -> Result<Vec<PathBuf>, io::Error> {
     let dir_path = fs::canonicalize(path)?;
     if dir_path.is_file() {
         return Ok(vec![dir_path]);
@@ -38,7 +36,7 @@ pub fn crawl_dir(path: &dyn AsRef<Path>) -> Result<Vec<PathBuf>, io::Error> {
 
     let mut result = Vec::<PathBuf>::new();
     for file in WalkDir::new(dir_path)
-        .follow_links(FOLLOW_LINKS)
+        .follow_links(follow_links)
         .into_iter()
         .filter_map(|f| f.ok())
     {
