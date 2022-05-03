@@ -23,9 +23,6 @@ impl MultipleIoErrors {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-    pub fn make_new(errors: Vec<(path::PathBuf, io::Error)>) -> Self {
-        MultipleIoErrors(errors)
-    }
     pub fn new() -> Self {
         MultipleIoErrors(Vec::new())
     }
@@ -211,10 +208,10 @@ impl DedupTree {
                             Some(errors)
                         }
                     }
-                    Err(e) => Some(MultipleIoErrors::make_new(vec![(dir_path, e)])),
+                    Err(e) => Some(MultipleIoErrors(vec![(dir_path, e)])),
                 }
             }
-            Err(e) => Some(MultipleIoErrors::make_new(vec![(raw_path, e)])),
+            Err(e) => Some(MultipleIoErrors(vec![(raw_path, e)])),
         }
     }
 }
