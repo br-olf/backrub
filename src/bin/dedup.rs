@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
 use clap::{Arg, Command, ValueHint};
 use clap_complete::{generate, Shell};
 use log::{error, info, warn};
-use std::process::exit;
 use std::io;
+use std::path::{Path, PathBuf};
+use std::process::exit;
 //use serde::{Deserialize, Serialize};
 use dedup::*;
 
@@ -48,6 +48,15 @@ fn default_tree_file() -> PathBuf {
 struct Config {
     treeFilePath: PathBuf,
     followSymlinks: bool,
+}
+
+impl Config {
+    fn new() -> Self {
+        Config {
+            treeFilePath: PathBuf::new(),
+            followSymlinks: true,
+        }
+    }
 }
 
 fn build_cli() -> Command<'static> {
@@ -115,28 +124,29 @@ fn build_cli() -> Command<'static> {
 fn parse_config() {
     let config_file_path: PathBuf;
     let config_file_path_env = std::env::var("DEDUP_CONFIG_PATH");
-    if config_file_path_env.is_err(){
+    if config_file_path_env.is_err() {
         config_file_path = default_conf_file();
-    }
-    else {
+    } else {
         config_file_path = Path::new(&config_file_path_env.unwrap()).to_path_buf();
     }
 
     let config = Config::new();
     if config_file_path.exists() {
-        match std::fs::read_to_string(config_file_path) {
+        match std::fs::read_to_string(config_file_path.clone()) {
             Ok(config_file) => {
-                let ini = configparser::ini::Ini::new();
-                ini.read(config_file);
+                let mut ini = configparser::ini::Ini::new();
+                ini.read(config_file.clone());
             }
             Err(e) => {
-                error!("Could not read cofig file {}:\n{}", config_file_path.display(), e);
+                error!(
+                    "Could not read cofig file {}:\n{}",
+                    config_file_path.display(),
+                    e
+                );
                 exit(1);
             }
         }
-
-    }
-    else {
+    } else {
         todo!("Load and save default config file")
     }
 
@@ -183,14 +193,18 @@ fn main() {
         }
         Ok(files) => {
             let hash_vec = calculate_file_hashes(files);
-            let (data, errors) = create_file_hash_tree(hash_vec);
+            let (file_tree, hash_tree, errors) = create_file_hash_tree(hash_vec);
             if let Some(e) = errors {
                 warn!("create_file_hash_tree returned {} errors: {}", e.len(), e);
             }
-            info!("create_file_hash_tree returned {} elements", data.len());
+            println!(
+                "create_file_hash_tree found {}/{} unique files",
+                hash_tree.len(),
+                file_tree.len()
+            );
         }
     }
 
     println!();
- //   parse_config();
+    //   parse_config();
 }

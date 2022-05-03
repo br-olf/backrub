@@ -1,11 +1,12 @@
+use serde;
+use serde_json;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::{error, fmt, fs, io};
+use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
 
 #[derive(Debug)]
 pub struct MultipleIoErrors {
-    errors: Vec<(PathBuf, io::Error)>,
+    errors: Vec<(path::PathBuf, io::Error)>,
 }
 impl error::Error for MultipleIoErrors {}
 impl fmt::Display for MultipleIoErrors {
@@ -20,10 +21,22 @@ impl MultipleIoErrors {
     pub fn len(&self) -> usize {
         self.errors.len()
     }
+    pub fn make_new(errors: Vec<(path::PathBuf, io::Error)>) -> Self {
+        MultipleIoErrors { errors: errors }
+    }
+    pub fn new() -> Self {
+        MultipleIoErrors { errors: Vec::new() }
+    }
+    pub fn add(&mut self, path: path::PathBuf, err: io::Error) {
+        self.errors.push((path, err))
+    }
 }
 
-pub fn crawl_dir(path: &dyn AsRef<Path>, follow_links: bool) -> Result<Vec<PathBuf>, io::Error> {
-    let dir_path = fs::canonicalize(path)?;
+pub fn crawl_dir<P: Into<path::PathBuf>>(
+    path: P,
+    follow_links: bool,
+) -> Result<Vec<path::PathBuf>, io::Error> {
+    let dir_path = fs::canonicalize(path.into())?;
     if dir_path.is_file() {
         return Ok(vec![dir_path]);
     }
@@ -34,7 +47,7 @@ pub fn crawl_dir(path: &dyn AsRef<Path>, follow_links: bool) -> Result<Vec<PathB
         ));
     }
 
-    let mut result = Vec::<PathBuf>::new();
+    let mut result = Vec::<path::PathBuf>::new();
     for file in WalkDir::new(dir_path)
         .follow_links(follow_links)
         .into_iter()
@@ -44,10 +57,13 @@ pub fn crawl_dir(path: &dyn AsRef<Path>, follow_links: bool) -> Result<Vec<PathB
             result.push(file.path().to_path_buf());
         }
     }
+    result.sort();
     Ok(result)
 }
 
-pub fn calculate_file_hashes(files: Vec<PathBuf>) -> Vec<(PathBuf, Result<[u8; 32], io::Error>)> {
+pub fn calculate_file_hashes(
+    files: Vec<path::PathBuf>,
+) -> Vec<(path::PathBuf, Result<[u8; 32], io::Error>)> {
     use rayon::prelude::*;
 
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -64,18 +80,29 @@ pub fn calculate_file_hashes(files: Vec<PathBuf>) -> Vec<(PathBuf, Result<[u8; 3
 }
 
 pub fn create_file_hash_tree(
-    hash_results: Vec<(PathBuf, Result<[u8; 32], io::Error>)>,
-) -> (BTreeMap<PathBuf, [u8; 32]>, Option<MultipleIoErrors>) {
-    let mut data = BTreeMap::<PathBuf, [u8; 32]>::new();
+    hash_results: Vec<(path::PathBuf, Result<[u8; 32], io::Error>)>,
+) -> (
+    BTreeMap<path::PathBuf, [u8; 32]>,
+    BTreeMap<[u8; 32], Vec<path::PathBuf>>,
+    Option<MultipleIoErrors>,
+) {
+    let mut file_tree = BTreeMap::<path::PathBuf, [u8; 32]>::new();
+    let mut hash_tree = BTreeMap::<[u8; 32], Vec<path::PathBuf>>::new();
     let mut errors = MultipleIoErrors {
-        errors: Vec::<(PathBuf, io::Error)>::new(),
+        errors: Vec::<(path::PathBuf, io::Error)>::new(),
     };
     let mut has_errors: bool = false;
 
     for (path, res) in hash_results {
         match res {
             Ok(hash) => {
-                data.insert(path, hash);
+                file_tree.insert(path.clone(), hash.clone());
+                match hash_tree.get_mut(&hash) {
+                    Some(entry) => entry.push(path),
+                    None => {
+                        hash_tree.insert(hash, vec![path]);
+                    }
+                }
             }
             Err(err) => {
                 errors.errors.push((path, err));
@@ -84,8 +111,123 @@ pub fn create_file_hash_tree(
         }
     }
     if has_errors {
-        (data, Some(errors))
+        (file_tree, hash_tree, Some(errors))
     } else {
-        (data, None)
+        (file_tree, hash_tree, None)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DedupTree {
+    hash_tree: BTreeMap<[u8; 32], Vec<path::PathBuf>>,
+    file_tree: BTreeMap<path::PathBuf, [u8; 32]>,
+}
+
+impl DedupTree {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(&self).unwrap()
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(&json)
+    }
+
+    pub fn new() -> Self {
+        DedupTree {
+            hash_tree: BTreeMap::new(),
+            file_tree: BTreeMap::new(),
+        }
+    }
+
+    pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> Option<[u8; 32]> {
+        let file_buf = file.into();
+        match self.file_tree.remove(&file_buf) {
+            None => {
+                return None;
+            }
+            Some(old_hash) => {
+                self._delete_from_hash_tree(old_hash, file_buf);
+                return Some(old_hash);
+            }
+        }
+    }
+
+    fn _delete_from_hash_tree(&mut self, hash: [u8; 32], file: path::PathBuf) {
+        let ht_entry = self.hash_tree.get_mut(&hash).unwrap();
+        if ht_entry.len() > 1 {
+            ht_entry.retain(|x| *x != file);
+        } else {
+            self.hash_tree.remove(&hash);
+        }
+    }
+    pub fn update<P: Into<path::PathBuf>>(
+        &mut self,
+        path: P,
+        follow_links: bool,
+    ) -> Option<MultipleIoErrors> {
+        let raw_path = path.into();
+        let dir_path_res = fs::canonicalize(raw_path.clone());
+        match dir_path_res {
+            Ok(dir_path) => {
+                match crawl_dir(dir_path.clone(), follow_links) {
+                    Ok(files) => {
+                        let hash_vec = calculate_file_hashes(files.clone());
+                        let mut errors = MultipleIoErrors::new();
+                        /***************************************************************/
+                        /* run through the newly generated hashes and update the trees */
+                        /***************************************************************/
+                        for (new_file, new_hash_result) in hash_vec {
+                            match new_hash_result {
+                                Ok(new_hash) => {
+                                    // replace file_tree entry and lookup if the file was already registered
+                                    if let Some(old_hash) =
+                                        self.file_tree.insert(new_file.clone(), new_hash)
+                                    {
+                                        self._delete_from_hash_tree(old_hash, new_file.clone());
+                                    }
+                                    // insert the new file into  hash_tree
+                                    match self.hash_tree.get_mut(&new_hash) {
+                                        None => {
+                                            self.hash_tree.insert(new_hash, vec![new_file]);
+                                        }
+                                        Some(entry) => {
+                                            entry.push(new_file);
+                                        }
+                                    }
+                                }
+                                Err(e) => errors.add(new_file, e),
+                            }
+                        }
+                        /**************************/
+                        /* cleanup orphan entries */
+                        /**************************/
+                        let mut files_to_delete = Vec::<path::PathBuf>::new();
+                        for (file, _) in self.file_tree.iter() {
+                            if file.starts_with(dir_path.clone()) {
+                                if let Err(_) = files.binary_search(&file.clone()) {
+                                    // file was not found again
+                                    files_to_delete.push(file.to_path_buf());
+                                }
+                            }
+                        }
+                        for file in files_to_delete {
+                            self.delete_file(file);
+                        }
+
+                        if errors.len() > 0 {
+                            return Some(errors);
+                        } else {
+                            return None;
+                        }
+                    }
+                    Err(e) => {
+                        return Some(MultipleIoErrors::make_new(vec![(dir_path, e)]));
+                    }
+                }
+            }
+            Err(e) => {
+                return Some(MultipleIoErrors::make_new(vec![(raw_path, e)]));
+            }
+        }
     }
 }
