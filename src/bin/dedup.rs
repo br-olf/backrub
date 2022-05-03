@@ -187,27 +187,6 @@ fn parse_config() {
 fn main() {
     env_logger::init();
 
-    match crawl_dir(&".", false) {
-        Err(e) => {
-            error!("crawl_dir FAILED: {}", e);
-        }
-        Ok(files) => {
-            let hash_vec = calculate_file_hashes(files.clone());
-            let (file_tree, hash_tree, errors) = create_file_hash_tree(hash_vec);
-            if let Some(e) = errors {
-                warn!("create_file_hash_tree returned {} errors: {}", e.len(), e);
-            }
-            println!(
-                "create_file_hash_tree found {}/{} unique files",
-                hash_tree.len(),
-                file_tree.len()
-            );
-            println!();
-            let h = file_tree.get(&files[0]).unwrap();
-            println!("{:?} == {:?}", h, convert_4u64_to_32u8(convert_32u8_to_4u64(h)));
-        }
-    }
-
     let mut tree = DedupTree::new();
     tree.update(".", true);
     println!("tree: {}/{}", tree.len_unique(), tree.len_paths());

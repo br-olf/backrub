@@ -14,6 +14,9 @@ impl fmt::Display for MultipleIoErrors {
     }
 }
 impl MultipleIoErrors {
+    pub fn iter(&self) -> std::slice::Iter<(path::PathBuf, io::Error)> {
+        self.0.iter()
+    }
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -86,43 +89,7 @@ pub fn calculate_file_hashes(
     receiver.iter().collect()
 }
 
-pub fn create_file_hash_tree(
-    hash_results: Vec<(path::PathBuf, Result<[u8; 32], io::Error>)>,
-) -> (
-    BTreeMap<path::PathBuf, [u8; 32]>,
-    BTreeMap<[u8; 32], Vec<path::PathBuf>>,
-    Option<MultipleIoErrors>,
-) {
-    let mut file_tree = BTreeMap::<path::PathBuf, [u8; 32]>::new();
-    let mut hash_tree = BTreeMap::<[u8; 32], Vec<path::PathBuf>>::new();
-    let mut errors = MultipleIoErrors::new();
-    let mut has_errors: bool = false;
-
-    for (path, res) in hash_results {
-        match res {
-            Ok(hash) => {
-                file_tree.insert(path.clone(), hash);
-                match hash_tree.get_mut(&hash) {
-                    Some(entry) => entry.push(path),
-                    None => {
-                        hash_tree.insert(hash, vec![path]);
-                    }
-                }
-            }
-            Err(err) => {
-                errors.add(path, err);
-                has_errors = true;
-            }
-        }
-    }
-    if has_errors {
-        (file_tree, hash_tree, Some(errors))
-    } else {
-        (file_tree, hash_tree, None)
-    }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DedupTree {
     hash_tree: BTreeMap<[u8; 32], Vec<path::PathBuf>>,
     file_tree: BTreeMap<path::PathBuf, [u8; 32]>,
