@@ -7,7 +7,7 @@ pub struct MultipleIoErrors(Vec<(path::PathBuf, io::Error)>);
 impl error::Error for MultipleIoErrors {}
 impl fmt::Display for MultipleIoErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (p, e) in &self.0 {
+        for (p, e) in self.iter() {
             write!(f, "\n{}: {}", p.display(), e)?
         }
         Ok(())
