@@ -43,7 +43,7 @@ fn crawl_dir<P: Into<path::PathBuf>>(
     path: P,
     follow_links: bool,
 ) -> Result<Vec<path::PathBuf>, io::Error> {
-    let dir_path = fs::canonicalize(path.into())?;
+    let dir_path = path.into();
     if dir_path.is_file() {
         return Ok(vec![dir_path]);
     }
