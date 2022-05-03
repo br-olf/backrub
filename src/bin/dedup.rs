@@ -210,5 +210,6 @@ fn main() {
     println!("tree: {}/{}", tree.len_unique(), tree.len_paths());
 
     println!();
+    println!("json: {}", tree.to_json());
     //   parse_config();
 }

@@ -119,10 +119,25 @@ pub fn create_file_hash_tree(
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DedupTree {
+//    #[serde(with = "serde_bytes")]
     hash_tree: BTreeMap<[u8; 32], Vec<path::PathBuf>>,
+//    #[serde(with = "serde_bytes")]
     file_tree: BTreeMap<path::PathBuf, [u8; 32]>,
 }
-
+/*
+use serde::ser::{Serialize, SerializeStruct, Serializer};
+impl Serialize for DedupTree {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("DedupTree", 2)?;
+        s.serialize_field("hashIndex", &self.hash_tree)?;
+        s.serialize_field("fileIndex", &self.file_tree)?;
+        s.end()
+    }
+}
+*/
 impl DedupTree {
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap()
