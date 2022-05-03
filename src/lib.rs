@@ -54,7 +54,7 @@ pub fn crawl_dir<P: Into<path::PathBuf>>(
         .filter_map(|f| f.ok())
     {
         if file.metadata().unwrap().is_file() {
-            result.push(file.path().to_path_buf());
+            result.push(fs::canonicalize(file.path()).unwrap().to_path_buf());
         }
     }
     result.sort();
@@ -130,6 +130,13 @@ impl DedupTree {
 
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(&json)
+    }
+
+    pub fn len_unique(&self) -> usize {
+        return self.hash_tree.len();
+    }
+    pub fn len_paths(&self) -> usize {
+        return self.file_tree.len();
     }
 
     pub fn new() -> Self {

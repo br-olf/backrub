@@ -205,6 +205,10 @@ fn main() {
         }
     }
 
+    let mut tree = DedupTree::new();
+    tree.update(".", true);
+    println!("tree: {}/{}", tree.len_unique(), tree.len_paths());
+
     println!();
     //   parse_config();
 }
