@@ -2,9 +2,8 @@ use std::collections::BTreeMap;
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
 
-
 #[derive(Debug, Default)]
-pub struct MultipleIoErrors (Vec<(path::PathBuf, io::Error)>);
+pub struct MultipleIoErrors(Vec<(path::PathBuf, io::Error)>);
 impl error::Error for MultipleIoErrors {}
 impl fmt::Display for MultipleIoErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,11 +32,11 @@ impl MultipleIoErrors {
 }
 
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
-    unsafe {std::mem::transmute::<&[u8; 32], &[u64; 4]>(input)}
+    unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
 }
 
 pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
-    unsafe {std::mem::transmute::<&[u64; 4], &[u8; 32]>(input)}
+    unsafe { std::mem::transmute::<&[u64; 4], &[u8; 32]>(input) }
 }
 
 pub fn crawl_dir<P: Into<path::PathBuf>>(
@@ -164,7 +163,7 @@ impl DedupTree {
     pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> Option<[u8; 32]> {
         let file_buf = file.into();
         match self.file_tree.remove(&file_buf) {
-            None => { None }
+            None => None,
             Some(old_hash) => {
                 self._delete_from_hash_tree(old_hash, &file_buf.into_boxed_path());
                 Some(old_hash)
@@ -245,14 +244,10 @@ impl DedupTree {
                             Some(errors)
                         }
                     }
-                    Err(e) => {
-                        Some(MultipleIoErrors::make_new(vec![(dir_path, e)]))
-                    }
+                    Err(e) => Some(MultipleIoErrors::make_new(vec![(dir_path, e)])),
                 }
             }
-            Err(e) => {
-                Some(MultipleIoErrors::make_new(vec![(raw_path, e)]))
-            }
+            Err(e) => Some(MultipleIoErrors::make_new(vec![(raw_path, e)])),
         }
     }
 }
