@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
 
+
 #[derive(Debug)]
 pub struct MultipleIoErrors {
     errors: Vec<(path::PathBuf, io::Error)>,
@@ -30,6 +31,14 @@ impl MultipleIoErrors {
     pub fn add(&mut self, path: path::PathBuf, err: io::Error) {
         self.errors.push((path, err))
     }
+}
+
+pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
+    unsafe {std::mem::transmute::<&[u8; 32], &[u64; 4]>(input)}
+}
+
+pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
+    unsafe {std::mem::transmute::<&[u64; 4], &[u8; 32]>(input)}
 }
 
 pub fn crawl_dir<P: Into<path::PathBuf>>(
@@ -119,32 +128,17 @@ pub fn create_file_hash_tree(
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DedupTree {
-//    #[serde(with = "serde_bytes")]
     hash_tree: BTreeMap<[u8; 32], Vec<path::PathBuf>>,
-//    #[serde(with = "serde_bytes")]
     file_tree: BTreeMap<path::PathBuf, [u8; 32]>,
 }
-/*
-use serde::ser::{Serialize, SerializeStruct, Serializer};
-impl Serialize for DedupTree {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut s = serializer.serialize_struct("DedupTree", 2)?;
-        s.serialize_field("hashIndex", &self.hash_tree)?;
-        s.serialize_field("fileIndex", &self.file_tree)?;
-        s.end()
-    }
-}
-*/
+
 impl DedupTree {
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap()
     }
 
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(&json)
+        serde_json::from_str(json)
     }
 
     pub fn len_unique(&self) -> usize {

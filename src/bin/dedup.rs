@@ -192,7 +192,7 @@ fn main() {
             error!("crawl_dir FAILED: {}", e);
         }
         Ok(files) => {
-            let hash_vec = calculate_file_hashes(files);
+            let hash_vec = calculate_file_hashes(files.clone());
             let (file_tree, hash_tree, errors) = create_file_hash_tree(hash_vec);
             if let Some(e) = errors {
                 warn!("create_file_hash_tree returned {} errors: {}", e.len(), e);
@@ -202,6 +202,9 @@ fn main() {
                 hash_tree.len(),
                 file_tree.len()
             );
+            println!();
+            let h = file_tree.get(&files[0]).unwrap();
+            println!("{:?} == {:?}", h, convert_4u64_to_32u8(convert_32u8_to_4u64(h)));
         }
     }
 
