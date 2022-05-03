@@ -146,13 +146,13 @@ impl DedupTree {
                 return None;
             }
             Some(old_hash) => {
-                self._delete_from_hash_tree(old_hash, file_buf);
+                self._delete_from_hash_tree(old_hash, &file_buf.into_boxed_path());
                 return Some(old_hash);
             }
         }
     }
 
-    fn _delete_from_hash_tree(&mut self, hash: [u8; 32], file: path::PathBuf) {
+    fn _delete_from_hash_tree(&mut self, hash: [u8; 32], file: &path::Path) {
         let ht_entry = self.hash_tree.get_mut(&hash).unwrap();
         if ht_entry.len() > 1 {
             ht_entry.retain(|x| *x != file);
@@ -166,8 +166,8 @@ impl DedupTree {
         follow_links: bool,
     ) -> Option<MultipleIoErrors> {
         let raw_path = path.into();
-        let dir_path_res = fs::canonicalize(raw_path.clone());
-        match dir_path_res {
+        let dir_path_expanded = fs::canonicalize(raw_path.clone());
+        match dir_path_expanded {
             Ok(dir_path) => {
                 match crawl_dir(dir_path.clone(), follow_links) {
                     Ok(files) => {
@@ -183,9 +183,12 @@ impl DedupTree {
                                     if let Some(old_hash) =
                                         self.file_tree.insert(new_file.clone(), new_hash)
                                     {
-                                        self._delete_from_hash_tree(old_hash, new_file.clone());
+                                        self._delete_from_hash_tree(
+                                            old_hash,
+                                            &new_file.clone().into_boxed_path(),
+                                        );
                                     }
-                                    // insert the new file into  hash_tree
+                                    // insert the new file into hash_tree
                                     match self.hash_tree.get_mut(&new_hash) {
                                         None => {
                                             self.hash_tree.insert(new_hash, vec![new_file]);
@@ -205,7 +208,7 @@ impl DedupTree {
                         for (file, _) in self.file_tree.iter() {
                             if file.starts_with(dir_path.clone()) {
                                 if let Err(_) = files.binary_search(&file.clone()) {
-                                    // file was not found again
+                                    // file is in tree but was not found again
                                     files_to_delete.push(file.to_path_buf());
                                 }
                             }
@@ -213,7 +216,9 @@ impl DedupTree {
                         for file in files_to_delete {
                             self.delete_file(file);
                         }
-
+                        /******************/
+                        /* error handling */
+                        /******************/
                         if errors.len() > 0 {
                             return Some(errors);
                         } else {
