@@ -39,7 +39,7 @@ pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
     unsafe { std::mem::transmute::<&[u64; 4], &[u8; 32]>(input) }
 }
 
-pub fn crawl_dir<P: Into<path::PathBuf>>(
+fn crawl_dir<P: Into<path::PathBuf>>(
     path: P,
     follow_links: bool,
 ) -> Result<Vec<path::PathBuf>, io::Error> {
@@ -68,9 +68,9 @@ pub fn crawl_dir<P: Into<path::PathBuf>>(
     Ok(result)
 }
 
-pub fn calculate_file_hashes(
+fn calculate_file_hashes(
     files: Vec<path::PathBuf>,
-) -> Vec<(path::PathBuf, Result<[u8; 32], io::Error>)> {
+) -> Vec<(path::PathBuf, Result<[u64; 4], io::Error>)> {
     use rayon::prelude::*;
 
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -78,7 +78,10 @@ pub fn calculate_file_hashes(
         .into_par_iter()
         .for_each_with(sender, |s, file| match fs::read(file.clone()) {
             Ok(content) => s
-                .send((file, Ok(*blake3::hash(&content).as_bytes())))
+                .send((
+                    file,
+                    Ok(*convert_32u8_to_4u64(blake3::hash(&content).as_bytes())),
+                ))
                 .unwrap(),
             Err(e) => s.send((file, Err(e))).unwrap(),
         });
@@ -88,8 +91,8 @@ pub fn calculate_file_hashes(
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DedupTree {
-    hash_tree: BTreeMap<[u8; 32], Vec<path::PathBuf>>,
-    file_tree: BTreeMap<path::PathBuf, [u8; 32]>,
+    hash_tree: BTreeMap<[u64; 4], Vec<path::PathBuf>>,
+    file_tree: BTreeMap<path::PathBuf, [u64; 4]>,
 }
 
 impl DedupTree {
@@ -124,18 +127,18 @@ impl DedupTree {
         result
     }
 
-    pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> Option<[u8; 32]> {
+    pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> bool {
         let file_buf = file.into();
         match self.file_tree.remove(&file_buf) {
-            None => None,
+            None => false,
             Some(old_hash) => {
                 self._delete_from_hash_tree(old_hash, &file_buf.into_boxed_path());
-                Some(old_hash)
+                true
             }
         }
     }
 
-    fn _delete_from_hash_tree(&mut self, hash: [u8; 32], file: &path::Path) {
+    fn _delete_from_hash_tree(&mut self, hash: [u64; 4], file: &path::Path) {
         let ht_entry = self.hash_tree.get_mut(&hash).unwrap();
         if ht_entry.len() > 1 {
             ht_entry.retain(|x| *x != file);
