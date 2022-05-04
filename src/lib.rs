@@ -122,7 +122,9 @@ impl DedupTree {
     pub fn get_duplicates(&self) -> Vec<Vec<path::PathBuf>> {
         let mut result = Vec::<Vec<path::PathBuf>>::new();
         for (_, paths) in self.hash_tree.iter() {
-            result.push(paths.to_vec());
+            if paths.len() > 1 {
+                result.push(paths.to_vec());
+            }
         }
         result
     }

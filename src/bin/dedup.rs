@@ -189,7 +189,8 @@ fn main() {
 
     let mut tree = DedupTree::new();
     tree.update(".", true);
-    println!("tree: {}/{}", tree.len_unique(), tree.len_paths());
+    println!("tree sizes: {}/{}", tree.len_unique(), tree.len_paths());
+    println!("found {} unique duplicates", tree.get_duplicates().len());
 
     println!();
     println!("json: {}", tree.to_json());
