@@ -26,8 +26,8 @@ impl MultipleIoErrors {
     pub fn new() -> Self {
         MultipleIoErrors(Vec::new())
     }
-    pub fn add(&mut self, path: path::PathBuf, err: io::Error) {
-        self.0.push((path, err))
+    pub fn add<P: Into<path::PathBuf>>(&mut self, path: P, err: io::Error) {
+        self.0.push((path.into(), err))
     }
 }
 
@@ -39,15 +39,14 @@ pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
     unsafe { std::mem::transmute::<&[u64; 4], &[u8; 32]>(input) }
 }
 
-fn crawl_dir<P: Into<path::PathBuf>>(
-    path: P,
+fn crawl_dir(
+    path: &path::Path,
     follow_links: bool,
 ) -> Result<Vec<path::PathBuf>, io::Error> {
-    let dir_path = path.into();
-    if dir_path.is_file() {
-        return Ok(vec![dir_path]);
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
     }
-    if !dir_path.is_dir() {
+    if !path.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "crawl_dir expects a file or directory",
@@ -55,7 +54,7 @@ fn crawl_dir<P: Into<path::PathBuf>>(
     }
 
     let mut result = Vec::<path::PathBuf>::new();
-    for file in WalkDir::new(dir_path)
+    for file in WalkDir::new(path)
         .follow_links(follow_links)
         .into_iter()
         .filter_map(|f| f.ok())
@@ -188,7 +187,7 @@ impl DedupTree {
         let dir_path_expanded = fs::canonicalize(raw_path.clone());
         match dir_path_expanded {
             Ok(dir_path) => {
-                match crawl_dir(dir_path.clone(), follow_links) {
+                match crawl_dir(dir_path.as_path(), follow_links) {
                     Ok(files) => {
                         let hash_vec = calculate_file_hashes(files.clone());
                         let mut errors = MultipleIoErrors::new();
