@@ -193,6 +193,13 @@ fn main() {
     println!("found {} unique duplicates", tree.get_duplicates().len());
 
     println!();
-    println!("json: {}", tree.to_json());
+    let json = tree.to_json();
+//    println!("json: {}", json);
+    let des_tree = DedupTree::from_json(&json).unwrap();
+    println!("des_tree sizes: {}/{}", des_tree.len_unique(), des_tree.len_paths());
+    println!("found {} unique duplicates", des_tree.get_duplicates().len());
+
+    println!();
+    println!("tree == des_tree: {}", tree == des_tree);
     //   parse_config();
 }

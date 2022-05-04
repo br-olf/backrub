@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
 
@@ -91,17 +91,22 @@ fn calculate_file_hashes(
 
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct DedupTree {
-    hash_tree: BTreeMap<[u64; 4], Vec<path::PathBuf>>,
+    hash_tree: BTreeMap<[u64; 4], BTreeSet<path::PathBuf>>,
     file_tree: BTreeMap<path::PathBuf, [u64; 4]>,
 }
 
 impl DedupTree {
     pub fn to_json(&self) -> String {
-        serde_json::to_string(&self).unwrap()
+        serde_json::to_string(&self.file_tree).unwrap()
     }
 
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+        let file_tree: BTreeMap<path::PathBuf, [u64; 4]> = serde_json::from_str(json)?;
+        let mut result = DedupTree::new();
+        for (file, hash) in file_tree {
+            result._update_helper(file, hash);
+        }
+        Ok(result)
     }
 
     pub fn len_unique(&self) -> usize {
@@ -119,11 +124,15 @@ impl DedupTree {
         }
     }
 
-    pub fn get_duplicates(&self) -> Vec<Vec<path::PathBuf>> {
-        let mut result = Vec::<Vec<path::PathBuf>>::new();
+    pub fn get_duplicates(&self) -> Vec<Vec<&path::Path>> {
+        let mut result = Vec::<Vec<&path::Path>>::new();
         for (_, paths) in self.hash_tree.iter() {
             if paths.len() > 1 {
-                result.push(paths.to_vec());
+                let mut tmp = Vec::<&path::Path>::new();
+                for entry in paths.iter() {
+                    tmp.push(entry.as_path());
+                }
+                result.push(tmp);
             }
         }
         result
@@ -148,6 +157,28 @@ impl DedupTree {
             self.hash_tree.remove(&hash);
         }
     }
+
+    fn _update_helper(&mut self, new_file: path::PathBuf, new_hash: [u64; 4]) {
+        // replace file_tree entry and lookup if the file was already registered
+        if let Some(old_hash) =
+            self.file_tree.insert(new_file.clone(), new_hash)
+        {
+            self._delete_from_hash_tree(
+                old_hash,
+                &new_file.clone().into_boxed_path(),
+            );
+        }
+        // insert the new file into hash_tree
+        match self.hash_tree.get_mut(&new_hash) {
+            None => {
+                self.hash_tree.insert(new_hash, BTreeSet::from([new_file]));
+            }
+            Some(entry) => {
+                entry.insert(new_file);
+            }
+        }
+    }
+
     pub fn update<P: Into<path::PathBuf>>(
         &mut self,
         path: P,
@@ -167,24 +198,7 @@ impl DedupTree {
                         for (new_file, new_hash_result) in hash_vec {
                             match new_hash_result {
                                 Ok(new_hash) => {
-                                    // replace file_tree entry and lookup if the file was already registered
-                                    if let Some(old_hash) =
-                                        self.file_tree.insert(new_file.clone(), new_hash)
-                                    {
-                                        self._delete_from_hash_tree(
-                                            old_hash,
-                                            &new_file.clone().into_boxed_path(),
-                                        );
-                                    }
-                                    // insert the new file into hash_tree
-                                    match self.hash_tree.get_mut(&new_hash) {
-                                        None => {
-                                            self.hash_tree.insert(new_hash, vec![new_file]);
-                                        }
-                                        Some(entry) => {
-                                            entry.push(new_file);
-                                        }
-                                    }
+                                    self._update_helper(new_file, new_hash);
                                 }
                                 Err(e) => errors.add(new_file, e),
                             }
