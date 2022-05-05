@@ -71,7 +71,7 @@ impl DedupTree {
         let file_tree: BTreeMap<path::PathBuf, [u64; 4]> = serde_json::from_str(json)?;
         let mut result = DedupTree::new();
         for (file, hash) in file_tree {
-            result._update_helper(file, hash);
+            result._update(file, hash);
         }
         Ok(result)
     }
@@ -135,18 +135,18 @@ impl DedupTree {
             ));
         }
 
-        let mut found_something = false;
+        let mut deleted_something = false;
         let mut files_to_delete = Vec::<path::PathBuf>::new();
         for (file, _) in self.file_tree.iter() {
             if file.starts_with(dir_buf.clone()) {
-                found_something = true;
+                deleted_something = true;
                 files_to_delete.push(file.to_path_buf());
             }
         }
         for file in files_to_delete {
             self._delete_file(file);
         }
-        Ok(found_something)
+        Ok(deleted_something)
     }
 
     fn _delete_from_hash_tree(&mut self, hash: [u64; 4], file: &path::Path) {
@@ -158,7 +158,7 @@ impl DedupTree {
         }
     }
 
-    fn _update_helper(&mut self, new_file: path::PathBuf, new_hash: [u64; 4]) {
+    fn _update(&mut self, new_file: path::PathBuf, new_hash: [u64; 4]) {
         // replace file_tree entry and lookup if the file was already registered
         if let Some(old_hash) = self.file_tree.insert(new_file.clone(), new_hash) {
             self._delete_from_hash_tree(old_hash, &new_file.clone().into_boxed_path());
@@ -179,11 +179,11 @@ impl DedupTree {
         path: P,
         follow_links: bool,
     ) -> Option<MultipleIoErrors> {
-        let raw_path = path.into();
-        let dir_path_expanded = fs::canonicalize(raw_path.clone());
-        match dir_path_expanded {
-            Ok(dir_path) => {
-                match crawl_dir(dir_path.as_path(), follow_links) {
+        let path_buf = path.into();
+        let canonicalized_path = fs::canonicalize(path_buf.clone());
+        match canonicalized_path {
+            Ok(sanitized_path) => {
+                match crawl_dir(sanitized_path.as_path(), follow_links) {
                     Ok(files) => {
                         let hash_vec = calculate_file_hashes(files.clone());
                         let mut errors = MultipleIoErrors::new();
@@ -193,7 +193,7 @@ impl DedupTree {
                         for (new_file, new_hash_result) in hash_vec {
                             match new_hash_result {
                                 Ok(new_hash) => {
-                                    self._update_helper(new_file, new_hash);
+                                    self._update(new_file, new_hash);
                                 }
                                 Err(e) => errors.add(new_file, e),
                             }
@@ -203,7 +203,7 @@ impl DedupTree {
                         /**************************/
                         let mut files_to_delete = Vec::<path::PathBuf>::new();
                         for (file, _) in self.file_tree.iter() {
-                            if file.starts_with(dir_path.clone())
+                            if file.starts_with(sanitized_path.clone())
                                 && files.binary_search(&file.clone()).is_err()
                             {
                                 // file is in tree but was not found again
@@ -222,10 +222,10 @@ impl DedupTree {
                             Some(errors)
                         }
                     }
-                    Err(e) => Some(MultipleIoErrors(vec![(dir_path, e)])),
+                    Err(e) => Some(MultipleIoErrors(vec![(sanitized_path, e)])),
                 }
             }
-            Err(e) => Some(MultipleIoErrors(vec![(raw_path, e)])),
+            Err(e) => Some(MultipleIoErrors(vec![(path_buf, e)])),
         }
     }
 }

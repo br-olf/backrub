@@ -189,17 +189,27 @@ fn main() {
 
     let mut tree = DedupTree::new();
     tree.update(".", true);
+
+    let json = tree.to_json();
+    let des_tree = DedupTree::from_json(&json).unwrap();
+
+    println!();
+    println!("json: {}", json);
+
+    println!();
     println!("tree sizes: {}/{}", tree.len_unique(), tree.len_paths());
     println!("found {} unique duplicates", tree.get_duplicates().len());
 
     println!();
-    let json = tree.to_json();
-//    println!("json: {}", json);
-    let des_tree = DedupTree::from_json(&json).unwrap();
     println!("des_tree sizes: {}/{}", des_tree.len_unique(), des_tree.len_paths());
     println!("found {} unique duplicates", des_tree.get_duplicates().len());
 
     println!();
     println!("tree == des_tree: {}", tree == des_tree);
+
+    tree.delete_dir(".").unwrap();
+    println!();
+    println!("deleted tree size: {}", tree.len_paths());
+
     //   parse_config();
 }
