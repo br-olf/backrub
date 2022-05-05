@@ -2,35 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
 
-#[derive(Debug, Default)]
-pub struct MultipleIoErrors(Vec<(path::PathBuf, io::Error)>);
-impl error::Error for MultipleIoErrors {}
-impl fmt::Display for MultipleIoErrors {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (p, e) in self.iter() {
-            write!(f, "\n{}: {}", p.display(), e)?
-        }
-        Ok(())
-    }
-}
-impl MultipleIoErrors {
-    pub fn iter(&self) -> std::slice::Iter<(path::PathBuf, io::Error)> {
-        self.0.iter()
-    }
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-    pub fn new() -> Self {
-        MultipleIoErrors(Vec::new())
-    }
-    pub fn add<P: Into<path::PathBuf>>(&mut self, path: P, err: io::Error) {
-        self.0.push((path.into(), err))
-    }
-}
-
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
 }
@@ -46,7 +17,7 @@ fn crawl_dir(path: &path::Path, follow_links: bool) -> Result<Vec<path::PathBuf>
     if !path.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "crawl_dir expects a file or directory",
+            "expected a file or directory",
         ));
     }
 
@@ -134,8 +105,18 @@ impl DedupTree {
         result
     }
 
-    pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> bool {
-        let file_buf = file.into();
+    pub fn delete_file<P: Into<path::PathBuf>>(&mut self, file: P) -> Result<bool, io::Error> {
+        let file_buf = fs::canonicalize(file.into())?;
+        if !file_buf.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a file",
+            ));
+        }
+        Ok(self._delete_file(file_buf))
+    }
+
+    fn _delete_file(&mut self, file_buf: path::PathBuf) -> bool {
         match self.file_tree.remove(&file_buf) {
             None => false,
             Some(old_hash) => {
@@ -143,6 +124,29 @@ impl DedupTree {
                 true
             }
         }
+    }
+
+    pub fn delete_dir<P: Into<path::PathBuf>>(&mut self, dir: P) -> Result<bool, io::Error> {
+        let dir_buf = fs::canonicalize(dir.into())?;
+        if !dir_buf.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a directory",
+            ));
+        }
+
+        let mut found_something = false;
+        let mut files_to_delete = Vec::<path::PathBuf>::new();
+        for (file, _) in self.file_tree.iter() {
+            if file.starts_with(dir_buf.clone()) {
+                found_something = true;
+                files_to_delete.push(file.to_path_buf());
+            }
+        }
+        for file in files_to_delete {
+            self._delete_file(file);
+        }
+        Ok(found_something)
     }
 
     fn _delete_from_hash_tree(&mut self, hash: [u64; 4], file: &path::Path) {
@@ -207,7 +211,7 @@ impl DedupTree {
                             }
                         }
                         for file in files_to_delete {
-                            self.delete_file(file);
+                            self._delete_file(file);
                         }
                         /******************/
                         /* error handling */
@@ -223,5 +227,41 @@ impl DedupTree {
             }
             Err(e) => Some(MultipleIoErrors(vec![(raw_path, e)])),
         }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MultipleIoErrors(Vec<(path::PathBuf, io::Error)>);
+
+impl error::Error for MultipleIoErrors {}
+
+impl fmt::Display for MultipleIoErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (p, e) in self.iter() {
+            write!(f, "\n{}: {}", p.display(), e)?
+        }
+        Ok(())
+    }
+}
+
+impl MultipleIoErrors {
+    pub fn iter(&self) -> std::slice::Iter<(path::PathBuf, io::Error)> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn new() -> Self {
+        MultipleIoErrors(Vec::new())
+    }
+
+    pub fn add<P: Into<path::PathBuf>>(&mut self, path: P, err: io::Error) {
+        self.0.push((path.into(), err))
     }
 }
