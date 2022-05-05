@@ -39,10 +39,7 @@ pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
     unsafe { std::mem::transmute::<&[u64; 4], &[u8; 32]>(input) }
 }
 
-fn crawl_dir(
-    path: &path::Path,
-    follow_links: bool,
-) -> Result<Vec<path::PathBuf>, io::Error> {
+fn crawl_dir(path: &path::Path, follow_links: bool) -> Result<Vec<path::PathBuf>, io::Error> {
     if path.is_file() {
         return Ok(vec![path.to_path_buf()]);
     }
@@ -159,13 +156,8 @@ impl DedupTree {
 
     fn _update_helper(&mut self, new_file: path::PathBuf, new_hash: [u64; 4]) {
         // replace file_tree entry and lookup if the file was already registered
-        if let Some(old_hash) =
-            self.file_tree.insert(new_file.clone(), new_hash)
-        {
-            self._delete_from_hash_tree(
-                old_hash,
-                &new_file.clone().into_boxed_path(),
-            );
+        if let Some(old_hash) = self.file_tree.insert(new_file.clone(), new_hash) {
+            self._delete_from_hash_tree(old_hash, &new_file.clone().into_boxed_path());
         }
         // insert the new file into hash_tree
         match self.hash_tree.get_mut(&new_hash) {
@@ -207,11 +199,11 @@ impl DedupTree {
                         /**************************/
                         let mut files_to_delete = Vec::<path::PathBuf>::new();
                         for (file, _) in self.file_tree.iter() {
-                            if file.starts_with(dir_path.clone()) {
-                                if files.binary_search(&file.clone()).is_err() {
-                                    // file is in tree but was not found again
-                                    files_to_delete.push(file.to_path_buf());
-                                }
+                            if file.starts_with(dir_path.clone())
+                                && files.binary_search(&file.clone()).is_err()
+                            {
+                                // file is in tree but was not found again
+                                files_to_delete.push(file.to_path_buf());
                             }
                         }
                         for file in files_to_delete {
