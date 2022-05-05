@@ -211,5 +211,11 @@ fn main() {
     println!();
     println!("deleted tree size: {}", tree.len_paths());
 
+    let bencoded: Vec<u8> = bincode::serialize(&des_tree).unwrap();
+    let bdecoded: DedupTree = bincode::deserialize(&bencoded[..]).unwrap();
+
+    println!();
+    println!("bindecoded == des_tree: {}", bdecoded == des_tree);
+
     //   parse_config();
 }
