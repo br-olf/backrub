@@ -19,6 +19,9 @@ walkdir = "2.3.2"
 rayon = "1.5.1"
 log = "0.4.14"
 env_logger = "0.9.0"
+hash-roll = "0.3.0"
+testfile = "0.0.4"
+rand = "0.8.5"
 
 [profile.release]
 opt-level = 3  # Optimize for speed.

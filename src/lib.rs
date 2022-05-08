@@ -265,3 +265,25 @@ impl MultipleIoErrors {
         self.0.push((path.into(), err))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_MultipleIOErrors() {
+        let instance = MultipleIoErrors::new();
+        assert!(instance.is_empty());
+    }
+    #[test]
+    fn filled_MultipleIOErrors() {
+        let mut instance = MultipleIoErrors::new();
+        instance.add("/a/path",
+                     io::Error::new(io::ErrorKind::InvalidInput,
+                     "a error message"));
+        instance.add(path::PathBuf::from("/another/path"),
+                     io::Error::new(io::ErrorKind::InvalidInput,
+                     "another error message"));
+        assert_eq!(instance.len(), 2);
+    }
+}
