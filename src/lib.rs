@@ -286,4 +286,61 @@ mod tests {
                      "another error message"));
         assert_eq!(instance.len(), 2);
     }
+    #[test]
+    fn find_duplicates() {
+        test_with_dir(|dir: path::PathBuf| {
+            let mut tree = DedupTree::new();
+            tree.update(dir, false);
+            assert_eq!(tree.len_paths(), 3);
+            assert_eq!(tree.len_unique(), 2);
+        });
+    }
+
+
+    fn test_with_dir<T>(test: T) -> () where T: Fn(path::PathBuf) + std::panic::RefUnwindSafe {
+        // Setup temporary directory
+        use rand::prelude::*;
+        use std::io::Write;
+        use rand::distributions::Alphanumeric;
+
+        let mut rng = StdRng::from_entropy();
+        let dirname: String = rng
+            .sample_iter(&Alphanumeric)
+            .take(30)
+            .map(char::from)
+            .collect();
+
+        let mut dir = std::env::temp_dir();
+        dir.push(dirname);
+        fs::create_dir(dir.clone()).expect("Test was not possible due to an unrelated io::Error");
+
+        // put some files into this directory
+        let mut file1_path = dir.clone();
+        file1_path.push("foo.txt");
+        let mut file1 = fs::File::create(file1_path).expect("Test was not possible due to an unrelated io::Error");
+        file1.write_all(b"Hello, world!").expect("Test was not possible due to an unrelated io::Error");
+        file1.sync_all().expect("Test was not possible due to an unrelated io::Error");
+
+        let mut file2_path = dir.clone();
+        file2_path.push("bar.txt");
+        let mut file2 = fs::File::create(file2_path).expect("Test was not possible due to an unrelated io::Error");
+        file2.write_all(b"Hello, world!").expect("Test was not possible due to an unrelated io::Error");
+        file2.sync_all().expect("Test was not possible due to an unrelated io::Error");
+
+        let mut file3_path = dir.clone();
+        file3_path.push("baz");
+        let mut file3 = fs::File::create(file3_path).expect("Test was not possible due to an unrelated io::Error");
+        file3.write_all(&[0xab,0xcd,0x12,0x43]).expect("Test was not possible due to an unrelated io::Error");
+        file3.sync_all().expect("Test was not possible due to an unrelated io::Error");
+
+        // run the test with this environment
+        let result = std::panic::catch_unwind(|| {test(dir.clone())});
+
+        // cleanup temporary directory
+        fs::remove_dir_all(dir).expect("Test was not possible due to an unrelated io::Error");
+
+        // test the result
+        assert!(result.is_ok())
+    }
+
 }
