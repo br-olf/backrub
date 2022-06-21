@@ -1,92 +1,121 @@
 use std::fs::File;
 use hash_roll::fastcdc;
-use hash_roll::Chunk;
-use std::io::{BufReader, BufRead, Read, Write};
+use std::io::{BufReader, BufRead};
 //use std::prelude::*;
 use hash_roll::ChunkIncr;
 use memmap::Mmap;
-use dedup::*;
-use std::collections::{BTreeMap, BTreeSet};
+//use dedup::*;
 
-fn some_chunk() -> impl Chunk {
-    fastcdc::FastCdc::default()
+
+
+fn get_first_chunks(buff:&[u8]) -> (Vec<Vec<u8>>, Vec<u8>) {
+    let chunk_iter = fastcdc::FastCdcIncr::default();
+    let mut iter_slices = chunk_iter.iter_slices_strict(buff);
+
+    let mut chunks = Vec::<Vec<u8>>::new();
+
+    while let Some(chunk) = iter_slices.next() {
+        chunks.push(chunk.to_vec());
+    }
+
+    let rest = iter_slices.by_ref().take_rem().to_vec();
+
+    (chunks, rest)
+}
+
+fn get_chunks(buff: &[u8], rest: &[u8]) -> (Vec<Vec<u8>>, Vec<u8>) {
+    get_first_chunks(&[rest, buff].concat())
+}
+
+fn chunk_using_buf_reader(fname: String) -> Vec<Vec<u8>>{
+    let f = File::open(fname).unwrap();
+    let fsize = f.metadata().unwrap().len();
+    let mut breader = BufReader::with_capacity(1usize << 20, f);
+
+    let fbuff = breader.fill_buf().unwrap();
+    let fbuff_len = fbuff.len();
+
+    let mut cnew: Vec<Vec<u8>>;
+
+    let (mut chunks, mut rest) = get_first_chunks(fbuff);
+    breader.consume(fbuff_len);
+
+    while let Ok(buff) = breader.fill_buf() {
+        let buff_len = buff.len();
+        if buff_len == 0 { break }
+        (cnew, rest) = get_chunks(buff, &rest[..]);
+        chunks.append(&mut cnew);
+        breader.consume(buff_len);
+    }
+    chunks.push(rest.to_vec());
+
+    let mut sizesum: usize = 0;
+    let anzchunks = chunks.len();
+    for chunk in chunks.clone() {
+        sizesum += chunk.len();
+    }
+
+    println!("chunked size total: {}", sizesum);
+    println!("file size metadata: {}", fsize  );
+    println!("anz chunks total: {}", anzchunks);
+
+    chunks
+}
+
+
+
+
+fn chunk_using_mmap(fname: String) -> Vec<Vec<u8>>{
+    let f = File::open(fname).unwrap();
+    let fsize = f.metadata().unwrap().len();
+
+    let chunk_iter = fastcdc::FastCdcIncr::default();
+    let mmap = unsafe { Mmap::map(&f).unwrap()  };
+
+    let mut chunks = Vec::<Vec<u8>>::new();
+
+    for chunk in chunk_iter.iter_slices(&mmap[..]) {
+        let cv = chunk.to_vec();
+        chunks.push(cv);
+    }
+
+    let mut sizesum: usize = 0;
+    let anzchunks = chunks.len();
+    for chunk in chunks.clone() {
+        sizesum += chunk.len();
+    }
+
+    println!("chunked size total: {}", sizesum);
+    println!("file size metadata: {}", fsize  );
+    println!("anz chunks total: {}", anzchunks);
+
+    chunks
 }
 
 
 fn main(){
-    let mut chunk_iter = fastcdc::FastCdcIncr::default();
-    let mut f = File::open("testfile.bin").unwrap();
+    let fname = std::env::args().nth(1).expect("no filename given");
 
-    let mmap = unsafe { Mmap::map(&f).unwrap()  };
+    println!();
+    println!("########################################################");
+    println!("############## BufReader ###############################");
+    println!("########################################################");
+    let c1 = chunk_using_buf_reader(fname.clone());
 
-    let mut anztree = BTreeMap::<[u64;4],usize>::new();
-    let mut sizetree = BTreeMap::<[u64;4],usize>::new();
+    println!();
+    println!("########################################################");
+    println!("############## MMAP ####################################");
+    println!("########################################################");
+    let c2 = chunk_using_mmap(fname);
 
-    for chunk in chunk_iter.iter_slices(&mmap[..]) {
-        let cv = chunk.to_vec();
-
-
-        let h = *convert_32u8_to_4u64(blake3::hash(chunk).as_bytes());
-
-        match anztree.get(&h) {
-            Some(count) => anztree.insert(h, count+1),
-            None  => anztree.insert(h, 1),
-        };
-        sizetree.insert(h, cv.len());
+    println!();
+    println!("########################################################");
+    println!("############## BufReader == MMAP #######################");
+    if c1 == c2 {
+        println!("#################### TRUE ##############################");
     }
-
-    for (k,si) in sizetree{
-
-        println!("anz: {}    size: {}", anztree.get(&k).unwrap(), si);
-
+    else {
+        println!("#################### FALSE #############################");
     }
-}
-
-fn main2() {
-    let f = File::open("testfile.bin").unwrap();
-    let metadata = f.metadata().unwrap();
-    let mut br = BufReader::new(f);
-    let chunk = some_chunk();
-    let mut ss = chunk.to_search_state();
-    let orig_data_len = metadata.len();
-    loop
-    {
-        let data = br.fill_buf().unwrap();
-        let len_data = data.len();
-        println!("Bytes in Buf: {}", len_data);
-
-        if len_data > 0 {
-
-            let (chunk_begin_opt, chunk_end) = chunk.find_chunk_edge(&mut ss, data);
-            match chunk_begin_opt {
-                Some(chunk_begin) => { println!("found chunk from: {} - {}", chunk_begin, chunk_end); }
-                None => { println!("Discarding {} bytes", chunk_end); }
-            }
-            br.consume(chunk_end);
-        }
-        else {
-            break;
-        }
-    }
-
-/*
-    loop {
-
-    match chunk {
-        Some(cut_point) => {
-            // map `cut_point` from the current slice back into the original slice so we can
-            // have consistent indexes
-            let g_cut = cut_point + orig_data.len() - data.len();
-            println!("chunk: {:?}", &orig_data[prev_cut..cut_point]);
-        },
-        None => {
-            println!("no chunk, done with data we have");
-            println!("remain: {:?}", &data[discard_ct..]);
-            break;
-        }
-    }
-
-    data = &data[discard_ct..];
-    }
-    */
+    println!("########################################################");
 }
