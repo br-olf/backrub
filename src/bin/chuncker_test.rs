@@ -1,14 +1,12 @@
-use std::fs::File;
 use hash_roll::fastcdc;
-use std::io::{BufReader, BufRead};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 //use std::prelude::*;
 use hash_roll::ChunkIncr;
 use memmap::Mmap;
 //use dedup::*;
 
-
-
-fn get_first_chunks(buff:&[u8]) -> (Vec<Vec<u8>>, Vec<u8>) {
+fn get_first_chunks(buff: &[u8]) -> (Vec<Vec<u8>>, Vec<u8>) {
     let chunk_iter = fastcdc::FastCdcIncr::default();
     let mut iter_slices = chunk_iter.iter_slices_strict(buff);
 
@@ -27,7 +25,7 @@ fn get_chunks(buff: &[u8], rest: &[u8]) -> (Vec<Vec<u8>>, Vec<u8>) {
     get_first_chunks(&[rest, buff].concat())
 }
 
-fn chunk_using_buf_reader(fname: String) -> Vec<Vec<u8>>{
+fn chunk_using_buf_reader(fname: String) -> Vec<Vec<u8>> {
     let f = File::open(fname).unwrap();
     let fsize = f.metadata().unwrap().len();
     let mut breader = BufReader::with_capacity(1usize << 20, f);
@@ -42,7 +40,9 @@ fn chunk_using_buf_reader(fname: String) -> Vec<Vec<u8>>{
 
     while let Ok(buff) = breader.fill_buf() {
         let buff_len = buff.len();
-        if buff_len == 0 { break }
+        if buff_len == 0 {
+            break;
+        }
         (cnew, rest) = get_chunks(buff, &rest[..]);
         chunks.append(&mut cnew);
         breader.consume(buff_len);
@@ -56,21 +56,18 @@ fn chunk_using_buf_reader(fname: String) -> Vec<Vec<u8>>{
     }
 
     println!("chunked size total: {}", sizesum);
-    println!("file size metadata: {}", fsize  );
+    println!("file size metadata: {}", fsize);
     println!("anz chunks total: {}", anzchunks);
 
     chunks
 }
 
-
-
-
-fn chunk_using_mmap(fname: String) -> Vec<Vec<u8>>{
+fn chunk_using_mmap(fname: String) -> Vec<Vec<u8>> {
     let f = File::open(fname).unwrap();
     let fsize = f.metadata().unwrap().len();
 
     let chunk_iter = fastcdc::FastCdcIncr::default();
-    let mmap = unsafe { Mmap::map(&f).unwrap()  };
+    let mmap = unsafe { Mmap::map(&f).unwrap() };
 
     let mut chunks = Vec::<Vec<u8>>::new();
 
@@ -86,14 +83,13 @@ fn chunk_using_mmap(fname: String) -> Vec<Vec<u8>>{
     }
 
     println!("chunked size total: {}", sizesum);
-    println!("file size metadata: {}", fsize  );
+    println!("file size metadata: {}", fsize);
     println!("anz chunks total: {}", anzchunks);
 
     chunks
 }
 
-
-fn main(){
+fn main() {
     let fname = std::env::args().nth(1).expect("no filename given");
 
     println!();
@@ -113,8 +109,7 @@ fn main(){
     println!("############## BufReader == MMAP #######################");
     if c1 == c2 {
         println!("#################### TRUE ##############################");
-    }
-    else {
+    } else {
         println!("#################### FALSE #############################");
     }
     println!("########################################################");
