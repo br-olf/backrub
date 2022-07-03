@@ -15,9 +15,9 @@ fn some_chunk() -> impl Chunk {
 
 fn main(){
     let mut chunk_iter = fastcdc::FastCdcIncr::default();
-    let mut f = File::open("testfile.bin").unwrap();
+    let mut f = File::open("/home/olaf/VirtualBox VMs/kali-linux-2022.1-virtualbox-amd64/kali-linux-2022.1-virtualbox-amd64-disk001.vdi").unwrap();
 
-    let mmap = unsafe { Mmap::map(&f).unwrap()  };
+    let mmap = unsafe{ Mmap::map(&f).unwrap() };
 
     let mut anztree = BTreeMap::<[u64;4],usize>::new();
     let mut sizetree = BTreeMap::<[u64;4],usize>::new();

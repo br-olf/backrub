@@ -44,12 +44,15 @@ fn calculate_file_hashes(
     files
         .into_par_iter()
         .for_each_with(sender, |s, file| match fs::read(file.clone()) {
-            Ok(content) => s
-                .send((
+            Ok(content) => {
+                let mut hasher = blake3::Hasher::new_derive_key("foobar");
+                hasher.update_rayon(&content);
+                s.send((
                     file,
-                    Ok(*convert_32u8_to_4u64(blake3::hash(&content).as_bytes())),
+                    Ok(*convert_32u8_to_4u64(hasher.finalize().as_bytes())),
                 ))
-                .unwrap(),
+                .unwrap()
+            }
             Err(e) => s.send((file, Err(e))).unwrap(),
         });
 
@@ -278,12 +281,14 @@ mod tests {
     #[test]
     fn filled_MultipleIOErrors() {
         let mut instance = MultipleIoErrors::new();
-        instance.add("/a/path",
-                     io::Error::new(io::ErrorKind::InvalidInput,
-                     "a error message"));
-        instance.add(path::PathBuf::from("/another/path"),
-                     io::Error::new(io::ErrorKind::InvalidInput,
-                     "another error message"));
+        instance.add(
+            "/a/path",
+            io::Error::new(io::ErrorKind::InvalidInput, "a error message"),
+        );
+        instance.add(
+            path::PathBuf::from("/another/path"),
+            io::Error::new(io::ErrorKind::InvalidInput, "another error message"),
+        );
         assert_eq!(instance.len(), 2);
     }
     #[test]
@@ -296,12 +301,14 @@ mod tests {
         });
     }
 
-
-    fn test_with_dir<T>(test: T) -> () where T: Fn(path::PathBuf) + std::panic::RefUnwindSafe {
+    fn test_with_dir<T>(test: T) -> ()
+    where
+        T: Fn(path::PathBuf) + std::panic::RefUnwindSafe,
+    {
         // Setup temporary directory
+        use rand::distributions::Alphanumeric;
         use rand::prelude::*;
         use std::io::Write;
-        use rand::distributions::Alphanumeric;
 
         let mut rng = StdRng::from_entropy();
         let dirname: String = rng
@@ -317,24 +324,39 @@ mod tests {
         // put some files into this directory
         let mut file1_path = dir.clone();
         file1_path.push("foo.txt");
-        let mut file1 = fs::File::create(file1_path).expect("Test was not possible due to an unrelated io::Error");
-        file1.write_all(b"Hello, world!").expect("Test was not possible due to an unrelated io::Error");
-        file1.sync_all().expect("Test was not possible due to an unrelated io::Error");
+        let mut file1 = fs::File::create(file1_path)
+            .expect("Test was not possible due to an unrelated io::Error");
+        file1
+            .write_all(b"Hello, world!")
+            .expect("Test was not possible due to an unrelated io::Error");
+        file1
+            .sync_all()
+            .expect("Test was not possible due to an unrelated io::Error");
 
         let mut file2_path = dir.clone();
         file2_path.push("bar.txt");
-        let mut file2 = fs::File::create(file2_path).expect("Test was not possible due to an unrelated io::Error");
-        file2.write_all(b"Hello, world!").expect("Test was not possible due to an unrelated io::Error");
-        file2.sync_all().expect("Test was not possible due to an unrelated io::Error");
+        let mut file2 = fs::File::create(file2_path)
+            .expect("Test was not possible due to an unrelated io::Error");
+        file2
+            .write_all(b"Hello, world!")
+            .expect("Test was not possible due to an unrelated io::Error");
+        file2
+            .sync_all()
+            .expect("Test was not possible due to an unrelated io::Error");
 
         let mut file3_path = dir.clone();
         file3_path.push("baz");
-        let mut file3 = fs::File::create(file3_path).expect("Test was not possible due to an unrelated io::Error");
-        file3.write_all(&[0xab,0xcd,0x12,0x43]).expect("Test was not possible due to an unrelated io::Error");
-        file3.sync_all().expect("Test was not possible due to an unrelated io::Error");
+        let mut file3 = fs::File::create(file3_path)
+            .expect("Test was not possible due to an unrelated io::Error");
+        file3
+            .write_all(&[0xab, 0xcd, 0x12, 0x43])
+            .expect("Test was not possible due to an unrelated io::Error");
+        file3
+            .sync_all()
+            .expect("Test was not possible due to an unrelated io::Error");
 
         // run the test with this environment
-        let result = std::panic::catch_unwind(|| {test(dir.clone())});
+        let result = std::panic::catch_unwind(|| test(dir.clone()));
 
         // cleanup temporary directory
         fs::remove_dir_all(dir).expect("Test was not possible due to an unrelated io::Error");
@@ -342,5 +364,4 @@ mod tests {
         // test the result
         assert!(result.is_ok())
     }
-
 }
