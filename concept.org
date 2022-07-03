@@ -1,0 +1,39 @@
+#+title: DEDUP Concept
+
+* Repo stucture
+.| meta/
+..| backups/
+...| manifest.json
+    `{
+        "version": 1
+        "key": Argon2 hash to verify password
+        "salt": 32 bytes of random data hex encoded
+        "encrypted": { # actually base64 encoded
+            "config": {
+                "chunker":{
+                    "minimum_chunk_size": 2048
+                    "average_chunk_size": 8192
+                    "maximum_chunk_size": 65536
+                }
+            }
+            "archives":{
+                "archive name 1": {
+                    "id": 32 bytes of random data
+                    "time": ISO 8601 timestamp
+                    "finished": true
+                }
+                ...
+            }
+        }
+    }`
+...| manifest.json.sig
+    `HMAC(Root-Key, manifest.json)`
+...| archives/
+....| enc()
+
+
+* Key structure
+Root Key: Argon2(
+    password: UserPass
+    salt: manifest.json ->key
+)
