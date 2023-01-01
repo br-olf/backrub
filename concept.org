@@ -35,5 +35,5 @@
 * Key structure
 Root Key: Argon2(
     password: UserPass
-    salt: manifest.json ->key
+    salt: manifest.json -> salt
 )
