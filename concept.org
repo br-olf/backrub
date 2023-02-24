@@ -32,8 +32,45 @@
 ....| enc()
 
 
-* Key structure
-Root Key: Argon2(
-    password: UserPass
-    salt: manifest.json -> salt
-)
+* Key Derivation
+Root Key:
+    let config = argon2::Config(
+        ad: &[],
+        hash_length: 192,
+        lanes: 4,
+        mem_cost: 1024*1024*2, //2GB
+        secret: &[],
+        thread_mode: ThreadMode::Parallel,
+        time_cost: 20,
+        variant: Variant::Argon2id,
+        version: Version::Version13
+    );
+    // salt -> manifest.json
+    let root_key = argon2::hash_raw(password, salt, config);
+
+    let manifest_sig_key = root_key[0..32];
+    let chunk_encryption_key = root_key[32..64];
+    let chunk_hash_key = root_key[64..96];
+    let inode_encryption_key = root_key[96..128];
+    let inode_hash_key = root_key[128..160];
+    let backup_encryption_key = root_key[160..192];
+
+
+* Encryption:
+
+* Data structures:
+
+** Backups_Enc (sled):
+[(nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng), enc_data: Vec<u8>)]
+
+** Backup:
+name: String,
+timestamp: String =
+    chrono::DateTime::<Utc>::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+root_inode: InodeHash,
+
+** Inodes_enc(sled):
+[InodeHash, (enc_data, nonce)]
+
+** Inode:
+....
