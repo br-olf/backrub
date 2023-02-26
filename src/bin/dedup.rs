@@ -186,15 +186,16 @@ fn parse_config() {
 }
 use dedup::structs::structs::FilePathGen;
 fn main(){
+    let mut s = std::collections::HashSet::<String>::new();
     let mut fg = FilePathGen::default();
     for _ in 0..256{
-        for i in 0..256{
-            let next = fg.next();
-        if i % 10 == 0 {
-            println!("{}", next.unwrap());
-        }
+        for i in 0..1024{
+            let next = fg.next().unwrap();
+            s.insert(next);
         }
     }
+
+    println!("{} == {}", s.len(), 256*1024);
 
 }
 
