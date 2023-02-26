@@ -66,10 +66,9 @@ fn build_cli() -> Command<'static> {
             Command::new("config")
                 .long_flag("config")
                 .short_flag('c')
-                .about("Change or print the configuration")
-                //.arg(
-                //    todo!("Todo");
-                //),
+                .about("Change or print the configuration"), //.arg(
+                                                             //    todo!("Todo");
+                                                             //),
         )
         .subcommand(
             Command::new("completion")
@@ -185,18 +184,17 @@ fn parse_config() {
     }
 }
 use dedup::structs::structs::FilePathGen;
-fn main(){
+fn main() {
     let mut s = std::collections::HashSet::<String>::new();
     let mut fg = FilePathGen::default();
-    for _ in 0..256{
-        for i in 0..1024{
+    for _ in 0..256 {
+        for i in 0..1024 {
             let next = fg.next().unwrap();
             s.insert(next);
         }
     }
 
-    println!("{} == {}", s.len(), 256*1024);
-
+    println!("{} == {}", s.len(), 256 * 1024);
 }
 
 fn main2() {
@@ -216,8 +214,15 @@ fn main2() {
     println!("found {} unique duplicates", tree.get_duplicates().len());
 
     println!();
-    println!("des_tree sizes: {}/{}", des_tree.len_unique(), des_tree.len_paths());
-    println!("found {} unique duplicates", des_tree.get_duplicates().len());
+    println!(
+        "des_tree sizes: {}/{}",
+        des_tree.len_unique(),
+        des_tree.len_paths()
+    );
+    println!(
+        "found {} unique duplicates",
+        des_tree.get_duplicates().len()
+    );
 
     println!();
     println!("tree == des_tree: {}", tree == des_tree);

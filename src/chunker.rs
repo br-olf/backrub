@@ -88,4 +88,3 @@ pub fn chunk_using_mmap(fname: String) -> Vec<Vec<u8>> {
 
     chunks
 }
-
