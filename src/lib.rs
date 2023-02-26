@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
-pub(crate) mod structs;
+pub mod structs;
 
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }

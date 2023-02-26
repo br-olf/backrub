@@ -1,3 +1,8 @@
+
+
+pub mod structs{
+
+
 use std::collections::HashMap;
 
 type ChunkHash = [u8; 32];
@@ -94,4 +99,45 @@ struct EncChunk {
 #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 struct Chunk {
     data: Vec<u8>,
+}
+
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct FilePathGen{
+    count: u64
+}
+
+
+impl Iterator for FilePathGen{
+    type Item = String;
+
+    fn next(&mut self) -> std::option::Option<<Self as Iterator>::Item> {
+        let mut name = String::new();
+        // we need floor(log2(self.count)/8) folders and 1 byte for the file_name
+        //folders are
+        let num_bytes = self.count as f64;
+        let num_bytes = num_bytes.log2()/8f64;
+        let num_bytes = num_bytes.floor() as usize + 1 as usize;
+        for i in 1..num_bytes{
+            // b0 = 0xff
+            let mut b0: u64 = !0u8 as u64;
+            // shift b0 in position
+            b0 = b0 << 8*i;
+            // apply mask
+            b0 = self.count & b0;
+            // shift back
+            let b0 = (b0 >> (8*i)) as u8;
+            //println!("{}", b0);
+            name += &format!("{b0:x}");
+            name += "/";
+        }
+
+        let mut b0 = !0u8 as u64;
+        b0 = self.count as u64 & b0;
+        let b0 = b0 as u8;
+        name += &format!("{b0:x}.bin");
+        self.count += 1;
+        return Some(name);
+    }
+
+}
 }

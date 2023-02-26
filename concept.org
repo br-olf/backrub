@@ -74,3 +74,32 @@ root_inode: InodeHash,
 
 ** Inode:
 ....
+
+** File storage
+each byte is 2 letters hex
+
+((4*8)*2 + (3*8)*5 + (2*8)*4 + (1*8)*1) = 256 bit
+
+Idea is something like
+
+```
+document_root/01/2345/2345/2345/2345/6789ab/6789ab/6789ab/6789ab/6789ab/6789ab/cdef0123/cdef0123.bin
+
+```
+
+---
+maybe better, make some database, chunkid -> filename and store files sequentially.
+
+Then storge like that:
+
+Set((filehash, filepath))
+
+
+
+
+* Ideen
+** backup and repair mode:
+	do backup and check hash of each chunck by rehashing
+	if broken, recreate chunck
+
+

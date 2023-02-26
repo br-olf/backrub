@@ -184,7 +184,21 @@ fn parse_config() {
         }
     }
 }
-fn main() {
+use dedup::structs::structs::FilePathGen;
+fn main(){
+    let mut fg = FilePathGen::default();
+    for _ in 0..256{
+        for i in 0..256{
+            let next = fg.next();
+        if i % 10 == 0 {
+            println!("{}", next.unwrap());
+        }
+        }
+    }
+
+}
+
+fn main2() {
     env_logger::init();
 
     let mut tree = DedupTree::new();
