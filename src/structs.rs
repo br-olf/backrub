@@ -1,6 +1,7 @@
 pub mod structs {
-
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::path::{PathBuf,Path};
 
     type ChunkHash = [u8; 32];
     type InodeHash = [u8; 32];
@@ -133,6 +134,70 @@ pub mod structs {
             name += &format!("{b0:x}.bin");
             self.count += 1;
             return Some(name);
+        }
+    }
+
+    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct ChunkFile {
+        ref_count: u64,
+        filename: std::path::PathBuf,
+    }
+
+    impl ChunkFile {
+        fn fromPathBuf(filename: PathBuf) -> ChunkFile {
+            return ChunkFile {
+                ref_count: 1u64,
+                filename: filename,
+            };
+        }
+        fn new(filename: PathBuf, ref_count: u64) -> ChunkFile {
+            return ChunkFile {
+                ref_count: ref_count,
+                filename: filename,
+            };
+        }
+        fn ref_count(&self) -> u64 {
+            return self.ref_count;
+        }
+        fn filename(&self) -> PathBuf {
+            return self.filename.clone();
+        }
+    }
+
+    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct ChunkStore(BTreeMap<ChunkHash, ChunkFile>);
+
+    impl ChunkStore {
+        fn insert(&mut self, key: &ChunkHash, filename: &Path) -> Option<ChunkFile> {
+                self.0.insert(key.clone(), ChunkFile::new(filename.to_path_buf(), self.get_ref_count(key) + 1))
+        }
+
+        fn remove(&mut self, key: &ChunkHash) -> Option<ChunkFile> {
+            let ref_count = self.get_ref_count(key);
+            if ref_count > 1 {
+                return self.0.insert(key.clone(), ChunkFile::new(self.get_filename(key).expect("Should never fail!").to_path_buf(), ref_count-1));
+            } else {
+                return self.0.remove(key);
+            }
+        }
+
+        fn get_filename(&self, key: &ChunkHash) -> Option<&Path>{
+            if let Some(e) = self.get_chunk_file(key) {
+                Some(e.filename.as_path())
+            } else {
+                None
+            }
+        }
+
+        fn get_ref_count(&self, key: &ChunkHash) -> u64{
+            let mut ref_count = 0u64;
+            if let Some(e) = self.0.get(key) {
+                ref_count = e.ref_count();
+            }
+            ref_count
+        }
+        fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
+            self.0.get(key)
         }
     }
 }
