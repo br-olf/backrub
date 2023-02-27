@@ -183,7 +183,7 @@ fn parse_config() {
         }
     }
 }
-use dedup::structs::structs::FilePathGen;
+use dedup::structs::structs::*;
 fn main() {
     let mut s = std::collections::HashSet::<String>::new();
     let mut fg = FilePathGen::default();
@@ -192,9 +192,14 @@ fn main() {
             let next = fg.next().unwrap();
             s.insert(next);
         }
+        println!("{}", fg.next().unwrap());
     }
 
     println!("{} == {}", s.len(), 256 * 1024);
+
+    println!("{:?}", log2u64(!0u64));
+    println!("{:?}", log2u64(64u64));
+    println!("{:?}", log2u64(2u64));
 }
 
 fn main2() {
