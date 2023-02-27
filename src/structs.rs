@@ -207,10 +207,14 @@ pub mod structs {
         fn get_ref_count(&self, key: &ChunkHash) -> u64;
         fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile>;
         fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile>;
+        fn len(&self) -> usize;
     }
 
     impl ChunkFileMap for ChunkFileBTreeMap {
-        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile>{
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
             &self.0
         }
 
@@ -268,12 +272,15 @@ pub mod structs {
             }
             Some((ref_count, filename))
         }
-        fn get_unused(&self) -> &Vec<PathBuf>{
+        fn get_unused(&self) -> &Vec<PathBuf> {
             &self.unused_paths
         }
     }
 
     impl ChunkFileMap for ChunkStore {
+        fn len(&self) -> usize {
+            self.chunkmap.len()
+        }
         fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
             self.chunkmap.get_mappings()
         }
