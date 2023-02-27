@@ -247,8 +247,9 @@ pub mod structs {
     }
 
     impl ChunkStore {
-        fn insert(&mut self, key: &ChunkHash) -> PathBuf {
+        fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
             let mut filename = PathBuf::default();
+            let ref_count = self.chunkmap.get_ref_count(key) + 1;
             if let Some(name) = self.chunkmap.get_filename(key) {
                 filename = name.to_path_buf();
             } else {
@@ -263,7 +264,7 @@ pub mod structs {
                     })
             }
             self.chunkmap.insert(key, filename.clone());
-            filename
+            (ref_count, filename)
         }
         fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
             let (ref_count, filename) = self.chunkmap.remove(key)?;
