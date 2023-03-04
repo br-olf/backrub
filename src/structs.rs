@@ -109,6 +109,14 @@ pub mod structs {
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct FilePathGen(u64);
+    impl FilePathGen{
+        pub fn new() -> FilePathGen{
+           FilePathGen::default()
+        }
+        pub fn from_U64(n: u64) -> FilePathGen {
+            FilePathGen{0: n}
+        }
+    }
 
     impl Iterator for FilePathGen {
         type Item = String;
@@ -129,7 +137,7 @@ pub mod structs {
                     b0 = self.0 & b0;
                     // shift back
                     let b0 = (b0 >> (8 * i)) as u8;
-                    //println!("{}", b0);
+                    // add folder
                     name += &format!("{b0:x}");
                     name += "/";
                 }
@@ -247,6 +255,9 @@ pub mod structs {
     }
 
     impl ChunkStore {
+        fn new() -> ChunkStore {
+            ChunkStore::default()
+        }
         fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
             let mut filename = PathBuf::default();
             let ref_count = self.chunkmap.get_ref_count(key) + 1;
@@ -293,6 +304,61 @@ pub mod structs {
         }
         fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
             self.chunkmap.get_chunk_file(key)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        // Note this useful idiom: importing names from outer (for mod tests) scope.
+        use super::*;
+
+        #[test]
+        fn test_FilePathGen() {
+            let mut s = std::collections::HashSet::<String>::new();
+            let mut fg = FilePathGen::default();
+            for _ in 0..256 {
+                for i in 0..1024 {
+                    let next = fg.next().unwrap();
+                    s.insert(next);
+                }
+            }
+            assert_eq!(s.len(), 256 * 1024);
+            assert_eq!(fg, FilePathGen{0: 256*1024});
+
+            let mut fg = FilePathGen::from_U64( !0u64 - 1);
+            assert_eq!(fg.next(), Some(String::from("ff/ff/ff/ff/ff/ff/ff/ff.bin")));
+            assert_eq!(fg.next(), None);
+        }
+
+        #[test]
+        fn test_log2u64(){
+            assert_eq!(log2u64(0u64), None);
+            assert_eq!(log2u64(!0u64), Some(63u64));
+            assert_eq!(log2u64(1u64), Some(0u64));
+            assert_eq!(log2u64(2u64), Some(1u64));
+            assert_eq!(log2u64(64u64), Some(6u64));
+        }
+        #[test]
+        fn test_ChunkStore(){
+            let mut cs = ChunkStore::new();
+            let h1 = blake3::hash(b"foo");
+            let h2 = blake3::hash(b"bar");
+            let h3 = blake3::hash(b"baz");
+            let h4 = blake3::hash(b"foobar");
+
+            assert_eq!(cs.insert(h1.as_bytes()), (1, PathBuf::from("1.bin")));
+            assert_eq!(cs.insert(h2.as_bytes()), (1, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()), (1, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.insert(h2.as_bytes()), (2, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()), (2, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.remove(h1.as_bytes()), Some((0, PathBuf::from("1.bin"))));
+            assert_eq!(cs.remove(h1.as_bytes()), None);
+
+            assert_eq!(cs.insert(h4.as_bytes()), (1, PathBuf::from("1.bin")));
+
+
         }
     }
 }
