@@ -184,8 +184,32 @@ fn parse_config() {
     }
 }
 use dedup::structs::structs::*;
-fn main() {
+use sled::{Error, IVec};
+use std::convert::TryInto;
+use once_cell::sync::OnceCell;
 
+
+static TEST: OnceCell<u64> = OnceCell::new();
+
+fn main() {
+    let config = sled::Config::new().temporary(true);
+    let db = config.open().unwrap();
+    let tree = db.open_tree(b"test").unwrap();
+    tree.insert(b"key", b"value");
+    tree.insert(b"k2",b"v2");
+    for t in tree.iter() {
+        match t {
+            Ok((k,v)) => {
+                println!("{:?} => {:?}", k, v);
+            }
+            Err(e) => {
+                println!("ERROR: {}", e);
+            }
+        }
+    }
+
+    TEST.set(64);
+    println!("{}", TEST.get().unwrap());
 }
 
 fn main2() {
