@@ -156,27 +156,27 @@ pub mod structs {
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct ChunkFile {
         ref_count: u64,
-        filename: std::path::PathBuf,
+        file_name: std::path::PathBuf,
     }
 
     impl ChunkFile {
-        fn fromPathBuf(filename: PathBuf) -> ChunkFile {
+        fn fromPathBuf(file_name: PathBuf) -> ChunkFile {
             return ChunkFile {
                 ref_count: 1u64,
-                filename: filename,
+                file_name: file_name,
             };
         }
-        fn new(filename: PathBuf, ref_count: u64) -> ChunkFile {
+        fn new(file_name: PathBuf, ref_count: u64) -> ChunkFile {
             return ChunkFile {
                 ref_count: ref_count,
-                filename: filename,
+                file_name: file_name,
             };
         }
         fn ref_count(&self) -> u64 {
             return self.ref_count;
         }
-        fn filename(&self) -> PathBuf {
-            return self.filename.clone();
+        fn file_name(&self) -> PathBuf {
+            return self.file_name.clone();
         }
     }
 
@@ -188,30 +188,30 @@ pub mod structs {
             let ref_count = self.get_ref_count(key);
             match ref_count {
                 0 => None,
-                1 => Some((0, self.0.remove(key)?.filename)),
+                1 => Some((0, self.0.remove(key)?.file_name)),
                 _ => {
                     let ref_count = ref_count - 1;
-                    let filename = self
-                        .get_filename(key)
+                    let file_name = self
+                        .get_file_name(key)
                         .expect("Should never fail!")
                         .to_path_buf();
                     self.0
-                        .insert(*key, ChunkFile::new(filename.clone(), ref_count));
-                    Some((ref_count, filename))
+                        .insert(*key, ChunkFile::new(file_name.clone(), ref_count));
+                    Some((ref_count, file_name))
                 }
             }
         }
 
-        fn insert(&mut self, key: &ChunkHash, filename: PathBuf) -> Option<ChunkFile> {
+        fn insert(&mut self, key: &ChunkHash, file_name: PathBuf) -> Option<ChunkFile> {
             self.0.insert(
                 key.clone(),
-                ChunkFile::new(filename, self.get_ref_count(key) + 1),
+                ChunkFile::new(file_name, self.get_ref_count(key) + 1),
             )
         }
     }
 
     pub trait ChunkFileMap {
-        fn get_filename(&self, key: &ChunkHash) -> Option<&Path>;
+        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path>;
         fn get_ref_count(&self, key: &ChunkHash) -> u64;
         fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile>;
         fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile>;
@@ -226,9 +226,9 @@ pub mod structs {
             &self.0
         }
 
-        fn get_filename(&self, key: &ChunkHash) -> Option<&Path> {
+        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path> {
             if let Some(e) = self.get_chunk_file(key) {
-                Some(e.filename.as_path())
+                Some(e.file_name.as_path())
             } else {
                 None
             }
@@ -259,12 +259,12 @@ pub mod structs {
             ChunkStore::default()
         }
         fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
-            let mut filename = PathBuf::default();
+            let mut file_name = PathBuf::default();
             let ref_count = self.chunkmap.get_ref_count(key) + 1;
-            if let Some(name) = self.chunkmap.get_filename(key) {
-                filename = name.to_path_buf();
+            if let Some(name) = self.chunkmap.get_file_name(key) {
+                file_name = name.to_path_buf();
             } else {
-                filename = self
+                file_name = self
                     .unused_paths
                     .pop()
                     .unwrap_or_else(|| match self.path_gen.next() {
@@ -274,15 +274,15 @@ pub mod structs {
                         }
                     })
             }
-            self.chunkmap.insert(key, filename.clone());
-            (ref_count, filename)
+            self.chunkmap.insert(key, file_name.clone());
+            (ref_count, file_name)
         }
         fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
-            let (ref_count, filename) = self.chunkmap.remove(key)?;
+            let (ref_count, file_name) = self.chunkmap.remove(key)?;
             if ref_count == 0 {
-                self.unused_paths.push(filename.clone())
+                self.unused_paths.push(file_name.clone())
             }
-            Some((ref_count, filename))
+            Some((ref_count, file_name))
         }
         fn get_unused(&self) -> &Vec<PathBuf> {
             &self.unused_paths
@@ -296,8 +296,8 @@ pub mod structs {
         fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
             self.chunkmap.get_mappings()
         }
-        fn get_filename(&self, key: &ChunkHash) -> Option<&Path> {
-            self.chunkmap.get_filename(key)
+        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path> {
+            self.chunkmap.get_file_name(key)
         }
         fn get_ref_count(&self, key: &ChunkHash) -> u64 {
             self.chunkmap.get_ref_count(key)
@@ -337,6 +337,7 @@ pub mod structs {
             assert_eq!(log2u64(1u64), Some(0u64));
             assert_eq!(log2u64(2u64), Some(1u64));
             assert_eq!(log2u64(64u64), Some(6u64));
+            assert_eq!(log2u64(63u64), Some(5u64));
         }
         #[test]
         fn test_ChunkStore() {
@@ -366,6 +367,15 @@ pub mod structs {
         data: Vec<u8>,
     }
 
+    use std::error;
+
+    #[derive(Debug)]
+    enum Error {
+        Generic(Box<dyn error::Error>),
+        Crypto(chacha20poly1305::aead::Error)
+    }
+    type Result<T> = std::result::Result<T, Error>;
+
     use chacha20poly1305::{
         aead::{Aead, AeadCore, KeyInit, OsRng},
         Nonce, XChaCha20Poly1305,
@@ -374,114 +384,78 @@ pub mod structs {
 
     pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
 
-    fn insert_chunk_to_sled(old: Option<&[u8]>) -> Option<Vec<u8>> {
-        match old {
-            Some(old) => match bincode::deserialize::<CryptoCtx>(old) {
-                Ok(old) => {
-                    let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().unwrap().into());
-                    match cipher.decrypt(&old.nonce.into(), &old.data[..]) {
-                        Ok(pt) => match bincode::deserialize::<ChunkFile>(&pt[..]) {
-                            Ok(old) => {
-                                todo!()
-                            }
-                            Err(e) => {
-                                todo!()
-                            }
-                        },
-                        Err(e) => {
-                            todo!()
-                        }
-                    }
-                }
-                Err(e) => {
-                    todo!()
-                }
-            },
-            None => {
-                todo!()
-            }
-        }
-        /*
-                let mut filename = PathBuf::default();
-                let ref_count = self.get_ref_count(key) + 1;
-                if let Some(name) = self.chunkmap.get_filename(key) {
-                    filename = name.to_path_buf();
-                } else {
-                    filename = self
-                        .unused_paths
-                        .pop()
-                        .unwrap_or_else(|| match self.path_gen.next() {
-                            Some(name) => PathBuf::from(name),
-                            None => {
-                                todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
-                            }
-                        })
-                }
-                self.chunkmap.insert(key, filename.clone());
-                (ref_count, filename)
-        */
+    use sled::transaction::ConflictableTransactionError;
+
+    #[derive(Debug)]
+    struct ChunkStoreSled {
+        path_gen: FilePathGen,
+        unused_paths: Vec<PathBuf>,
+        chunk_map: sled::Db,
     }
 
-    /*
-    //    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-        struct ChunkStoreSled {
-            path_gen: FilePathGen,
-            chunkmap: sled::Tree,
-            unused_paths: Vec<PathBuf>,
+    impl ChunkStoreSled {
+        fn new(db: sled::Db) -> ChunkStoreSled {
+            ChunkStoreSled {
+                path_gen: FilePathGen::default(),
+                unused_paths: Vec::<PathBuf>::default(),
+                chunk_map: db,
+            }
         }
 
+        fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
+            match self.chunk_map.remove(key).unwrap() {
+                None => {
+                    let file_name = self.unused_paths
+                                         .pop()
+                                         .unwrap_or_else(||{
+                                             PathBuf::from(self.path_gen.next()
+                                                           .expect("BUG: Please contact me if you need more than 10^19 chunks, I'd really like to know the system you are on"))
+                    });
 
-        impl ChunkStoreSled {
-            fn new() -> ChunkStoreSled {
-                ChunkStoreSled::default()
-            }
-            fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
-                let mut filename = PathBuf::default();
-                let ref_count = self.get_ref_count(key) + 1;
-                if let Some(name) = self.chunkmap.get_filename(key) {
-                    filename = name.to_path_buf();
-                } else {
-                    filename = self
-                        .unused_paths
-                        .pop()
-                        .unwrap_or_else(|| match self.path_gen.next() {
-                            Some(name) => PathBuf::from(name),
-                            None => {
-                                todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
-                            }
-                        })
+                    self.chunk_map.insert(
+                        key,
+                        encrypt_chunk_file(ChunkFile::fromPathBuf(file_name.clone()))?
+                    ).map_err(|e| Error::Generic(e.into()))?;
+
+                    Ok((1u64, file_name))
+
                 }
-                self.chunkmap.insert(key, filename.clone());
-                (ref_count, filename)
-            }
-            fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
-                let (ref_count, filename) = self.chunkmap.remove(key)?;
-                if ref_count == 0 {
-                    self.unused_paths.push(filename.clone())
-                }
-                Some((ref_count, filename))
-            }
-            fn get_unused(&self) -> &Vec<PathBuf> {
-                &self.unused_paths
-            }
-        }
+                Some(old) => {
+                    let old = decrypt_chunk_file(&old)?;
 
-        impl ChunkFileMap for ChunkStoreSled {
-            fn len(&self) -> usize {
-                self.chunkmap.len()
-            }
-            fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
-                self.chunkmap.get_mappings()
-            }
-            fn get_filename(&self, key: &ChunkHash) -> Option<&Path> {
-                self.chunkmap.get_filename(key)
-            }
-            fn get_ref_count(&self, key: &ChunkHash) -> u64 {
-                self.chunkmap.get_ref_count(key)
-            }
-            fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
-                self.chunkmap.get_chunk_file(key)
+                    let ref_count = old.ref_count + 1;
+
+                    self.chunk_map.insert(
+                        key,
+                        encrypt_chunk_file(ChunkFile::new(old.file_name.clone(), ref_count))?
+                    ).map_err(|e| Error::Generic(e.into()))?;
+
+                    Ok((ref_count, old.file_name))
+
+                }
             }
         }
-    */
+    }
+
+
+    fn encrypt_chunk_file(chunk_file: ChunkFile) -> Result<Vec<u8>> {
+        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+        let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!").into());
+        let serialized_chunk_file = bincode::serialize(&chunk_file).map_err(|e| Error::Generic(e.into()))?;
+
+        let data = cipher.encrypt(&nonce.into(), &serialized_chunk_file[..]).map_err(|e| Error::Crypto(e))?;
+
+        let ctx = CryptoCtx{nonce, data};
+
+        bincode::serialize(&ctx).map_err(|e| Error::Generic(e.into()))
+    }
+
+    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkFile> {
+        let ctx = bincode::deserialize::<CryptoCtx>(encrypted_data).map_err(|e| Error::Generic(e.into()))?;
+        let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!").into());
+        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..]).map_err(|e| Error::Crypto(e))?;
+
+        bincode::deserialize(&decrypted_data).map_err(|e| Error::Generic(e.into()))
+    }
+
 }
