@@ -109,12 +109,12 @@ pub mod structs {
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct FilePathGen(u64);
-    impl FilePathGen{
-        pub fn new() -> FilePathGen{
-           FilePathGen::default()
+    impl FilePathGen {
+        pub fn new() -> FilePathGen {
+            FilePathGen::default()
         }
         pub fn from_U64(n: u64) -> FilePathGen {
-            FilePathGen{0: n}
+            FilePathGen { 0: n }
         }
     }
 
@@ -323,15 +323,15 @@ pub mod structs {
                 }
             }
             assert_eq!(s.len(), 256 * 1024);
-            assert_eq!(fg, FilePathGen{0: 256*1024});
+            assert_eq!(fg, FilePathGen { 0: 256 * 1024 });
 
-            let mut fg = FilePathGen::from_U64( !0u64 - 1);
+            let mut fg = FilePathGen::from_U64(!0u64 - 1);
             assert_eq!(fg.next(), Some(String::from("ff/ff/ff/ff/ff/ff/ff/ff.bin")));
             assert_eq!(fg.next(), None);
         }
 
         #[test]
-        fn test_log2u64(){
+        fn test_log2u64() {
             assert_eq!(log2u64(0u64), None);
             assert_eq!(log2u64(!0u64), Some(63u64));
             assert_eq!(log2u64(1u64), Some(0u64));
@@ -339,7 +339,7 @@ pub mod structs {
             assert_eq!(log2u64(64u64), Some(6u64));
         }
         #[test]
-        fn test_ChunkStore(){
+        fn test_ChunkStore() {
             let mut cs = ChunkStore::new();
             let h1 = blake3::hash(b"foo");
             let h2 = blake3::hash(b"bar");
@@ -357,134 +357,131 @@ pub mod structs {
             assert_eq!(cs.remove(h1.as_bytes()), None);
 
             assert_eq!(cs.insert(h4.as_bytes()), (1, PathBuf::from("1.bin")));
-
-
         }
     }
 
-#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct CryptoCtx {
-    nonce: EncNonce,
-    data: Vec<u8>,
-}
+    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    pub struct CryptoCtx {
+        nonce: EncNonce,
+        data: Vec<u8>,
+    }
 
-use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    XChaCha20Poly1305, Nonce
-};
-use once_cell::sync::OnceCell;
+    use chacha20poly1305::{
+        aead::{Aead, AeadCore, KeyInit, OsRng},
+        Nonce, XChaCha20Poly1305,
+    };
+    use once_cell::sync::OnceCell;
 
-pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
-
+    pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
 
     fn insert_chunk_to_sled(old: Option<&[u8]>) -> Option<Vec<u8>> {
-   match old {
-       Some(old) => {
-           match bincode::deserialize::<CryptoCtx>(old){
-               Ok(old) => {
-                   let cipher = XChaCha20Poly1305::new(&chacha20poly1305::Key::from(CHUNK_STORE_KEY.get().unwrap());
-                   match cipher.decrypt(&old.nonce, &old.data[..]) {
-                   Ok(pt) => {
-                       match bincode::deserialize::<ChunkFile>(&pt[..]){
-                           Ok(old) => { todo!() }
-                           Err(e) => { todo!() }
-                       }
-                   }
-                   Err(e) => {
-                       todo!()
-                   }
-               }
-               }
-               Err(e) => { todo!() }
-               }
+        match old {
+            Some(old) => match bincode::deserialize::<CryptoCtx>(old) {
+                Ok(old) => {
+                    let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().unwrap().into());
+                    match cipher.decrypt(&old.nonce.into(), &old.data[..]) {
+                        Ok(pt) => match bincode::deserialize::<ChunkFile>(&pt[..]) {
+                            Ok(old) => {
+                                todo!()
+                            }
+                            Err(e) => {
+                                todo!()
+                            }
+                        },
+                        Err(e) => {
+                            todo!()
+                        }
+                    }
+                }
+                Err(e) => {
+                    todo!()
+                }
+            },
+            None => {
+                todo!()
+            }
+        }
+        /*
+                let mut filename = PathBuf::default();
+                let ref_count = self.get_ref_count(key) + 1;
+                if let Some(name) = self.chunkmap.get_filename(key) {
+                    filename = name.to_path_buf();
+                } else {
+                    filename = self
+                        .unused_paths
+                        .pop()
+                        .unwrap_or_else(|| match self.path_gen.next() {
+                            Some(name) => PathBuf::from(name),
+                            None => {
+                                todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
+                            }
+                        })
+                }
+                self.chunkmap.insert(key, filename.clone());
+                (ref_count, filename)
+        */
+    }
 
-       }
-       None => {
-           todo!()
-       }
-   }
     /*
-            let mut filename = PathBuf::default();
-            let ref_count = self.get_ref_count(key) + 1;
-            if let Some(name) = self.chunkmap.get_filename(key) {
-                filename = name.to_path_buf();
-            } else {
-                filename = self
-                    .unused_paths
-                    .pop()
-                    .unwrap_or_else(|| match self.path_gen.next() {
-                        Some(name) => PathBuf::from(name),
-                        None => {
-                            todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
-                        }
-                    })
+    //    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+        struct ChunkStoreSled {
+            path_gen: FilePathGen,
+            chunkmap: sled::Tree,
+            unused_paths: Vec<PathBuf>,
+        }
+
+
+        impl ChunkStoreSled {
+            fn new() -> ChunkStoreSled {
+                ChunkStoreSled::default()
             }
-            self.chunkmap.insert(key, filename.clone());
-            (ref_count, filename)
+            fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
+                let mut filename = PathBuf::default();
+                let ref_count = self.get_ref_count(key) + 1;
+                if let Some(name) = self.chunkmap.get_filename(key) {
+                    filename = name.to_path_buf();
+                } else {
+                    filename = self
+                        .unused_paths
+                        .pop()
+                        .unwrap_or_else(|| match self.path_gen.next() {
+                            Some(name) => PathBuf::from(name),
+                            None => {
+                                todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
+                            }
+                        })
+                }
+                self.chunkmap.insert(key, filename.clone());
+                (ref_count, filename)
+            }
+            fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
+                let (ref_count, filename) = self.chunkmap.remove(key)?;
+                if ref_count == 0 {
+                    self.unused_paths.push(filename.clone())
+                }
+                Some((ref_count, filename))
+            }
+            fn get_unused(&self) -> &Vec<PathBuf> {
+                &self.unused_paths
+            }
+        }
+
+        impl ChunkFileMap for ChunkStoreSled {
+            fn len(&self) -> usize {
+                self.chunkmap.len()
+            }
+            fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
+                self.chunkmap.get_mappings()
+            }
+            fn get_filename(&self, key: &ChunkHash) -> Option<&Path> {
+                self.chunkmap.get_filename(key)
+            }
+            fn get_ref_count(&self, key: &ChunkHash) -> u64 {
+                self.chunkmap.get_ref_count(key)
+            }
+            fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
+                self.chunkmap.get_chunk_file(key)
+            }
+        }
     */
-}
-
-
-/*
-//    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-    struct ChunkStoreSled {
-        path_gen: FilePathGen,
-        chunkmap: sled::Tree,
-        unused_paths: Vec<PathBuf>,
-    }
-
-
-    impl ChunkStoreSled {
-        fn new() -> ChunkStoreSled {
-            ChunkStoreSled::default()
-        }
-        fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
-            let mut filename = PathBuf::default();
-            let ref_count = self.get_ref_count(key) + 1;
-            if let Some(name) = self.chunkmap.get_filename(key) {
-                filename = name.to_path_buf();
-            } else {
-                filename = self
-                    .unused_paths
-                    .pop()
-                    .unwrap_or_else(|| match self.path_gen.next() {
-                        Some(name) => PathBuf::from(name),
-                        None => {
-                            todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
-                        }
-                    })
-            }
-            self.chunkmap.insert(key, filename.clone());
-            (ref_count, filename)
-        }
-        fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
-            let (ref_count, filename) = self.chunkmap.remove(key)?;
-            if ref_count == 0 {
-                self.unused_paths.push(filename.clone())
-            }
-            Some((ref_count, filename))
-        }
-        fn get_unused(&self) -> &Vec<PathBuf> {
-            &self.unused_paths
-        }
-    }
-
-    impl ChunkFileMap for ChunkStoreSled {
-        fn len(&self) -> usize {
-            self.chunkmap.len()
-        }
-        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
-            self.chunkmap.get_mappings()
-        }
-        fn get_filename(&self, key: &ChunkHash) -> Option<&Path> {
-            self.chunkmap.get_filename(key)
-        }
-        fn get_ref_count(&self, key: &ChunkHash) -> u64 {
-            self.chunkmap.get_ref_count(key)
-        }
-        fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
-            self.chunkmap.get_chunk_file(key)
-        }
-    }
-*/
 }
