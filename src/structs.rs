@@ -307,59 +307,6 @@ pub mod structs {
         }
     }
 
-    #[cfg(test)]
-    mod tests {
-        // Note this useful idiom: importing names from outer (for mod tests) scope.
-        use super::*;
-
-        #[test]
-        fn test_FilePathGen() {
-            let mut s = std::collections::HashSet::<String>::new();
-            let mut fg = FilePathGen::default();
-            for _ in 0..256 {
-                for i in 0..1024 {
-                    let next = fg.next().unwrap();
-                    s.insert(next);
-                }
-            }
-            assert_eq!(s.len(), 256 * 1024);
-            assert_eq!(fg, FilePathGen { 0: 256 * 1024 });
-
-            let mut fg = FilePathGen::from_U64(!0u64 - 1);
-            assert_eq!(fg.next(), Some(String::from("ff/ff/ff/ff/ff/ff/ff/ff.bin")));
-            assert_eq!(fg.next(), None);
-        }
-
-        #[test]
-        fn test_log2u64() {
-            assert_eq!(log2u64(0u64), None);
-            assert_eq!(log2u64(!0u64), Some(63u64));
-            assert_eq!(log2u64(1u64), Some(0u64));
-            assert_eq!(log2u64(2u64), Some(1u64));
-            assert_eq!(log2u64(64u64), Some(6u64));
-            assert_eq!(log2u64(63u64), Some(5u64));
-        }
-        #[test]
-        fn test_ChunkStore() {
-            let mut cs = ChunkStore::new();
-            let h1 = blake3::hash(b"foo");
-            let h2 = blake3::hash(b"bar");
-            let h3 = blake3::hash(b"baz");
-            let h4 = blake3::hash(b"foobar");
-
-            assert_eq!(cs.insert(h1.as_bytes()), (1, PathBuf::from("1.bin")));
-            assert_eq!(cs.insert(h2.as_bytes()), (1, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()), (1, PathBuf::from("3.bin")));
-
-            assert_eq!(cs.insert(h2.as_bytes()), (2, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()), (2, PathBuf::from("3.bin")));
-
-            assert_eq!(cs.remove(h1.as_bytes()), Some((0, PathBuf::from("1.bin"))));
-            assert_eq!(cs.remove(h1.as_bytes()), None);
-
-            assert_eq!(cs.insert(h4.as_bytes()), (1, PathBuf::from("1.bin")));
-        }
-    }
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct CryptoCtx {
@@ -414,7 +361,7 @@ pub mod structs {
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(ChunkFile::fromPathBuf(file_name.clone()))?
+                        encrypt_chunk_file(&ChunkFile::fromPathBuf(file_name.clone()))?
                     ).map_err(|e| Error::Generic(e.into()))?;
 
                     Ok((1u64, file_name))
@@ -427,7 +374,7 @@ pub mod structs {
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(ChunkFile::new(old.file_name.clone(), ref_count))?
+                        encrypt_chunk_file(&ChunkFile::new(old.file_name.clone(), ref_count))?
                     ).map_err(|e| Error::Generic(e.into()))?;
 
                     Ok((ref_count, old.file_name))
@@ -438,24 +385,127 @@ pub mod structs {
     }
 
 
-    fn encrypt_chunk_file(chunk_file: ChunkFile) -> Result<Vec<u8>> {
-        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
-        let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!").into());
-        let serialized_chunk_file = bincode::serialize(&chunk_file).map_err(|e| Error::Generic(e.into()))?;
-
-        let data = cipher.encrypt(&nonce.into(), &serialized_chunk_file[..]).map_err(|e| Error::Crypto(e))?;
-
-        let ctx = CryptoCtx{nonce, data};
-
-        bincode::serialize(&ctx).map_err(|e| Error::Generic(e.into()))
+    fn encrypt_chunk_file(chunk_file: &ChunkFile) -> Result<Vec<u8>> {
+        encrypt(chunk_file, CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!"))
     }
 
     fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkFile> {
-        let ctx = bincode::deserialize::<CryptoCtx>(encrypted_data).map_err(|e| Error::Generic(e.into()))?;
-        let cipher = XChaCha20Poly1305::new(CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!").into());
-        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..]).map_err(|e| Error::Crypto(e))?;
+        decrypt(encrypted_data, CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!"))
+    }
 
+    use serde::{Serialize, Deserialize};
+    fn encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
+        /// Generic function to encrypt data in dedup
+        // generate nonce
+        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+        // setup the cipher
+        let cipher = XChaCha20Poly1305::new(key.into());
+        // convert data to Vec<u8>
+        let serialized_data = bincode::serialize(data).map_err(|e| Error::Generic(e.into()))?;
+        // encrypt the data
+        let encrypted_data = cipher.encrypt(&nonce.into(), &serialized_data[..]).map_err(|e| Error::Crypto(e))?;
+        // construct CryptoCtx using the nonce and the encrypted data
+        let ctx = CryptoCtx{nonce, data: encrypted_data};
+        // convert CryptoCtx to Vec<u8>
+        bincode::serialize(&ctx).map_err(|e| Error::Generic(e.into()))
+    }
+
+    fn decrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &[u8], key: &EncKey) -> Result<S> {
+        /// Generic function to decrypt data encrypted by dedup
+        // decode encrypted data to split nonce and encrypted data
+        let ctx = bincode::deserialize::<CryptoCtx>(data).map_err(|e| Error::Generic(e.into()))?;
+        // setup the cipher
+        let cipher = XChaCha20Poly1305::new(key.into());
+        // decrypt the data
+        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..]).map_err(|e| Error::Crypto(e))?;
+        // convert decrypted data to the target data type
         bincode::deserialize(&decrypted_data).map_err(|e| Error::Generic(e.into()))
     }
 
+    #[cfg(test)]
+    mod tests {
+        // Note this useful idiom: importing names from outer (for mod tests) scope.
+        use super::*;
+
+        #[test]
+        fn test_encryption_success(){
+            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+            let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let enc = encrypt(&testdata, &key.into()).unwrap();
+            let dec: Chunk = decrypt(&enc, &key.into()).unwrap();
+            assert_eq!(testdata, dec);
+
+        }
+
+        #[test]
+        fn test_encryption_fail_tempering(){
+            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+            let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let mut enc = encrypt(&testdata, &key.into()).unwrap();
+            let last = enc.pop().unwrap();
+            enc.push(!last);
+
+            let dec: Result<Chunk> = decrypt(&enc, &key.into());
+            assert!(dec.is_err());
+        }
+
+        #[test]
+        fn test_encryption_fail_key(){
+            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+            let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let enc = encrypt(&testdata, &key.into()).unwrap();
+            key[0] = !key[0];
+
+            let dec: Result<Chunk> = decrypt(&enc, &key.into());
+            assert!(dec.is_err());
+        }
+
+        #[test]
+        fn test_FilePathGen() {
+            let mut s = std::collections::HashSet::<String>::new();
+            let mut fg = FilePathGen::default();
+            for _ in 0..256 {
+                for i in 0..1024 {
+                    let next = fg.next().unwrap();
+                    s.insert(next);
+                }
+            }
+            assert_eq!(s.len(), 256 * 1024);
+            assert_eq!(fg, FilePathGen { 0: 256 * 1024 });
+
+            let mut fg = FilePathGen::from_U64(!0u64 - 1);
+            assert_eq!(fg.next(), Some(String::from("ff/ff/ff/ff/ff/ff/ff/ff.bin")));
+            assert_eq!(fg.next(), None);
+        }
+
+        #[test]
+        fn test_log2u64() {
+            assert_eq!(log2u64(0u64), None);
+            assert_eq!(log2u64(!0u64), Some(63u64));
+            assert_eq!(log2u64(1u64), Some(0u64));
+            assert_eq!(log2u64(2u64), Some(1u64));
+            assert_eq!(log2u64(64u64), Some(6u64));
+            assert_eq!(log2u64(63u64), Some(5u64));
+        }
+        #[test]
+        fn test_ChunkStore() {
+            let mut cs = ChunkStore::new();
+            let h1 = blake3::hash(b"foo");
+            let h2 = blake3::hash(b"bar");
+            let h3 = blake3::hash(b"baz");
+            let h4 = blake3::hash(b"foobar");
+
+            assert_eq!(cs.insert(h1.as_bytes()), (1, PathBuf::from("1.bin")));
+            assert_eq!(cs.insert(h2.as_bytes()), (1, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()), (1, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.insert(h2.as_bytes()), (2, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()), (2, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.remove(h1.as_bytes()), Some((0, PathBuf::from("1.bin"))));
+            assert_eq!(cs.remove(h1.as_bytes()), None);
+
+            assert_eq!(cs.insert(h4.as_bytes()), (1, PathBuf::from("1.bin")));
+        }
+    }
 }

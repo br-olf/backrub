@@ -1,3 +1,7 @@
+#[doc(inline)]
+pub use std;
+
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::{error, fmt, fs, io, path};
 use walkdir::WalkDir;
