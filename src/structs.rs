@@ -491,7 +491,7 @@ pub mod structs {
                 let (key, encrypted_data) = data.map_err(|e| Error::Generic(e.into()))?;
                 let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                 if key.len() != 32 {
-                    return Err(Error::DedupError(DedupError::ChunkStoreSled("chunk hash has the wrong size, there seems to be garbage in the sled::Tree".to_owned())));
+                    return Err(DedupError::ChunkStoreSled("chunk hash has the wrong size, there seems to be garbage in the sled::Tree".to_owned()).into());
                 } else {
                     let key: ChunkHash = key.chunks_exact(32).next().unwrap().try_into().unwrap();
                     result.insert(key, chunk_file);
@@ -556,9 +556,7 @@ pub mod structs {
         // convert data to Vec<u8>
         let serialized_data = bincode::serialize(data).map_err(|e| Error::Generic(e.into()))?;
         // encrypt the data
-        let encrypted_data = cipher
-            .encrypt(&nonce.into(), &serialized_data[..])
-            .map_err(|e| Error::Crypto(e))?;
+        let encrypted_data = cipher.encrypt(&nonce.into(), &serialized_data[..])?;
         // construct CryptoCtx using the nonce and the encrypted data
         let ctx = CryptoCtx {
             nonce,
@@ -575,9 +573,7 @@ pub mod structs {
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(key.into());
         // decrypt the data
-        let decrypted_data = cipher
-            .decrypt(&ctx.nonce.into(), &ctx.data[..])
-            .map_err(|e| Error::Crypto(e))?;
+        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..])?;
         // convert decrypted data to the target data type
         bincode::deserialize(&decrypted_data).map_err(|e| Error::Generic(e.into()))
     }
