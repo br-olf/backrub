@@ -307,20 +307,60 @@ pub mod structs {
         }
     }
 
-
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     pub struct CryptoCtx {
         nonce: EncNonce,
         data: Vec<u8>,
     }
 
-    use std::error;
+    use std::{error, fmt};
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    enum DedupError {
+        ChunkStoreSled(String),
+    }
+
+    impl fmt::Display for DedupError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                DedupError::ChunkStoreSled(msg) => {
+                    write!(f, "dedup::DedupError::ChunkStoreSled {}", msg)
+                }
+            }
+        }
+    }
+
+    impl error::Error for DedupError {}
+
 
     #[derive(Debug)]
     enum Error {
         Generic(Box<dyn error::Error>),
-        Crypto(chacha20poly1305::aead::Error)
+        Crypto(chacha20poly1305::aead::Error),
+        DedupError(DedupError),
     }
+
+    impl fmt::Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Error::Generic(boxed_error) => {
+                    write!(f, "dedup::Error::Generic: ");
+                    let err = &*boxed_error;
+                    err.fmt(f)
+                }
+                Error::Crypto(error) => {
+                    write!(f, "dedup::Error::Crypto: ");
+                    error.fmt(f)
+                }
+                Error::DedupError(error) => {
+                    error.fmt(f)
+                }
+            }
+        }
+    }
+
+    impl error::Error for Error {}
+
     type Result<T> = std::result::Result<T, Error>;
 
     use chacha20poly1305::{
@@ -337,20 +377,24 @@ pub mod structs {
     struct ChunkStoreSled {
         path_gen: FilePathGen,
         unused_paths: Vec<PathBuf>,
-        chunk_map: sled::Db,
+        chunk_map: sled::Tree,
     }
 
     impl ChunkStoreSled {
-        fn new(db: sled::Db) -> ChunkStoreSled {
+        fn new(tree: sled::Tree) -> ChunkStoreSled {
             ChunkStoreSled {
                 path_gen: FilePathGen::default(),
                 unused_paths: Vec::<PathBuf>::default(),
-                chunk_map: db,
+                chunk_map: tree,
             }
         }
 
         fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
-            match self.chunk_map.remove(key).unwrap() {
+            match self
+                .chunk_map
+                .remove(key)
+                .map_err(|e| Error::Generic(e.into()))?
+            {
                 None => {
                     let file_name = self.unused_paths
                                          .pop()
@@ -359,41 +403,138 @@ pub mod structs {
                                                            .expect("BUG: Please contact me if you need more than 10^19 chunks, I'd really like to know the system you are on"))
                     });
 
-                    self.chunk_map.insert(
-                        key,
-                        encrypt_chunk_file(&ChunkFile::fromPathBuf(file_name.clone()))?
-                    ).map_err(|e| Error::Generic(e.into()))?;
+                    self.chunk_map
+                        .insert(
+                            key,
+                            encrypt_chunk_file(&ChunkFile::fromPathBuf(file_name.clone()))?,
+                        )
+                        .map_err(|e| Error::Generic(e.into()))?;
 
                     Ok((1u64, file_name))
-
                 }
                 Some(old) => {
                     let old = decrypt_chunk_file(&old)?;
 
                     let ref_count = old.ref_count + 1;
 
-                    self.chunk_map.insert(
-                        key,
-                        encrypt_chunk_file(&ChunkFile::new(old.file_name.clone(), ref_count))?
-                    ).map_err(|e| Error::Generic(e.into()))?;
+                    self.chunk_map
+                        .insert(
+                            key,
+                            encrypt_chunk_file(&ChunkFile::new(old.file_name.clone(), ref_count))?,
+                        )
+                        .map_err(|e| Error::Generic(e.into()))?;
 
                     Ok((ref_count, old.file_name))
-
                 }
+            }
+        }
+
+        fn remove(&mut self, key: &ChunkHash) -> Result<Option<(u64, PathBuf)>> {
+            /// Removes a chunk reference and returns the reference count as well as the file name the chunk is supposed to be stored in.
+            ///
+            /// - Returns `Ok(None)` if chunk was not referenced (no file name is associated with that chunk hash)
+            /// - Returns `Ok((0, file_name))` if the last reference to this chunk was removed indicating that the chunk file should be removed
+            match self
+                .chunk_map
+                .remove(key)
+                .map_err(|e| Error::Generic(e.into()))?
+            {
+                None => Ok(None),
+                Some(old) => {
+                    let old = decrypt_chunk_file(&old)?;
+                    if old.ref_count <= 1 {
+                        // save old file name for reuse
+                        self.unused_paths.push(old.file_name.clone());
+                        Ok(Some((0u64, old.file_name)))
+                    } else {
+                        let ref_count = old.ref_count - 1;
+                        self.chunk_map
+                            .insert(
+                                key,
+                                encrypt_chunk_file(&ChunkFile::new(
+                                    old.file_name.clone(),
+                                    ref_count,
+                                ))?,
+                            )
+                            .map_err(|e| Error::Generic(e.into()))?;
+                        Ok(Some((ref_count, old.file_name)))
+                    }
+                }
+            }
+        }
+
+        fn len(&self) -> usize {
+            /// Returns the number of stored chunks
+            ///
+            /// This performs a full O(n) scan
+            self.chunk_map.len()
+        }
+
+        fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, ChunkFile>> {
+            /// Returns a BTreeMap containing the contens of the internal mappings.
+            ///
+            /// This decrypts all contens creates a compleatly new map in memory
+            let mut result = BTreeMap::<ChunkHash, ChunkFile>::new();
+            for data in self.chunk_map.iter() {
+                let (key, encrypted_data) = data.map_err(|e| Error::Generic(e.into()))?;
+                let chunk_file = decrypt_chunk_file(&encrypted_data)?;
+                if key.len() != 32 {
+                    return Err(Error::DedupError(DedupError::ChunkStoreSled("chunk hash has the wrong size, there seems to be garbage in the sled::Tree".to_owned())));
+                } else {
+                    let key: ChunkHash = key.chunks_exact(32).next().unwrap().try_into().unwrap();
+                    result.insert(key, chunk_file);
+                }
+            }
+            Ok(result)
+        }
+
+        fn get_chunk_file(&self, key: &ChunkHash) -> Result<Option<ChunkFile>> {
+            match self
+                .chunk_map
+                .get(key)
+                .map_err(|e| Error::Generic(e.into()))?
+            {
+                None => Ok(None),
+                Some(encrypted_data) => {
+                    let chunk_file = decrypt_chunk_file(&encrypted_data)?;
+                    Ok(Some(chunk_file))
+                }
+            }
+        }
+        fn get_ref_count(&self, key: &ChunkHash) -> Result<u64> {
+            match self.get_chunk_file(key)? {
+                None => Ok(0u64),
+                Some(chunk_file) => Ok(chunk_file.ref_count),
+            }
+        }
+
+        fn get_file_name(&self, key: &ChunkHash) -> Result<Option<PathBuf>> {
+            match self.get_chunk_file(key)? {
+                None => Ok(None),
+                Some(chunk_file) => Ok(Some(chunk_file.file_name)),
             }
         }
     }
 
-
     fn encrypt_chunk_file(chunk_file: &ChunkFile) -> Result<Vec<u8>> {
-        encrypt(chunk_file, CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!"))
+        encrypt(
+            chunk_file,
+            CHUNK_STORE_KEY
+                .get()
+                .expect("CHUNK_STORE_KEY should be initialized!"),
+        )
     }
 
     fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkFile> {
-        decrypt(encrypted_data, CHUNK_STORE_KEY.get().expect("CHUNK_STORE_KEY should be initialized!"))
+        decrypt(
+            encrypted_data,
+            CHUNK_STORE_KEY
+                .get()
+                .expect("CHUNK_STORE_KEY should be initialized!"),
+        )
     }
 
-    use serde::{Serialize, Deserialize};
+    use serde::{Deserialize, Serialize};
     fn encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
         /// Generic function to encrypt data in dedup
         // generate nonce
@@ -403,9 +544,14 @@ pub mod structs {
         // convert data to Vec<u8>
         let serialized_data = bincode::serialize(data).map_err(|e| Error::Generic(e.into()))?;
         // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.into(), &serialized_data[..]).map_err(|e| Error::Crypto(e))?;
+        let encrypted_data = cipher
+            .encrypt(&nonce.into(), &serialized_data[..])
+            .map_err(|e| Error::Crypto(e))?;
         // construct CryptoCtx using the nonce and the encrypted data
-        let ctx = CryptoCtx{nonce, data: encrypted_data};
+        let ctx = CryptoCtx {
+            nonce,
+            data: encrypted_data,
+        };
         // convert CryptoCtx to Vec<u8>
         bincode::serialize(&ctx).map_err(|e| Error::Generic(e.into()))
     }
@@ -417,7 +563,9 @@ pub mod structs {
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(key.into());
         // decrypt the data
-        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..]).map_err(|e| Error::Crypto(e))?;
+        let decrypted_data = cipher
+            .decrypt(&ctx.nonce.into(), &ctx.data[..])
+            .map_err(|e| Error::Crypto(e))?;
         // convert decrypted data to the target data type
         bincode::deserialize(&decrypted_data).map_err(|e| Error::Generic(e.into()))
     }
@@ -428,18 +576,21 @@ pub mod structs {
         use super::*;
 
         #[test]
-        fn test_encryption_success(){
-            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+        fn test_encryption_success() {
+            let testdata = Chunk {
+                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
+            };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = encrypt(&testdata, &key.into()).unwrap();
             let dec: Chunk = decrypt(&enc, &key.into()).unwrap();
             assert_eq!(testdata, dec);
-
         }
 
         #[test]
-        fn test_encryption_fail_tempering(){
-            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+        fn test_encryption_fail_tempering() {
+            let testdata = Chunk {
+                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
+            };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let mut enc = encrypt(&testdata, &key.into()).unwrap();
             let last = enc.pop().unwrap();
@@ -450,8 +601,10 @@ pub mod structs {
         }
 
         #[test]
-        fn test_encryption_fail_key(){
-            let testdata = Chunk{data: vec![1u8,2u8,3u8,4u8,5u8]};
+        fn test_encryption_fail_key() {
+            let testdata = Chunk {
+                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
+            };
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = encrypt(&testdata, &key.into()).unwrap();
             key[0] = !key[0];
