@@ -648,6 +648,34 @@ pub mod structs {
             assert_eq!(log2u64(64u64), Some(6u64));
             assert_eq!(log2u64(63u64), Some(5u64));
         }
+
+        #[test]
+        fn test_ChunkStoreSled() {
+
+            let key: EncKey = *blake3::hash(b"foobar").as_bytes();
+            CHUNK_STORE_KEY.set(key);
+            let config = sled::Config::new().temporary(true);
+            let db = config.open().unwrap();
+
+            let mut cs = ChunkStoreSled::new(db.open_tree(b"test").unwrap());
+            let h1 = blake3::hash(b"foo");
+            let h2 = blake3::hash(b"bar");
+            let h3 = blake3::hash(b"baz");
+            let h4 = blake3::hash(b"foobar");
+
+            assert_eq!(cs.insert(h1.as_bytes()).unwrap(), (1, PathBuf::from("1.bin")));
+            assert_eq!(cs.insert(h2.as_bytes()).unwrap(), (1, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()).unwrap(), (1, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.insert(h2.as_bytes()).unwrap(), (2, PathBuf::from("2.bin")));
+            assert_eq!(cs.insert(h3.as_bytes()).unwrap(), (2, PathBuf::from("3.bin")));
+
+            assert_eq!(cs.remove(h1.as_bytes()).unwrap(), Some((0, PathBuf::from("1.bin"))));
+            assert_eq!(cs.remove(h1.as_bytes()).unwrap(), None);
+
+            assert_eq!(cs.insert(h4.as_bytes()).unwrap(), (1, PathBuf::from("1.bin")));
+        }
+
         #[test]
         fn test_ChunkStore() {
             let mut cs = ChunkStore::new();
