@@ -361,6 +361,18 @@ pub mod structs {
 
     impl error::Error for Error {}
 
+    impl std::convert::From<chacha20poly1305::aead::Error> for Error {
+        fn from(err: chacha20poly1305::aead::Error) -> Self {
+            Error::Crypto(err)
+        }
+    }
+
+    impl std::convert::From<DedupError> for Error {
+        fn from(err: DedupError) -> Self {
+            Error::DedupError(err)
+        }
+    }
+
     type Result<T> = std::result::Result<T, Error>;
 
     use chacha20poly1305::{
