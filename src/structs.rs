@@ -317,14 +317,14 @@ pub mod structs {
 
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     enum DedupError {
-        ChunkStoreSled(String),
+        SledKeyLengthError,
     }
 
     impl fmt::Display for DedupError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
-                DedupError::ChunkStoreSled(msg) => {
-                    write!(f, "dedup::DedupError::ChunkStoreSled {}", msg)
+                DedupError::SledKeyLengthError => {
+                    write!(f, "SledKeyLengthError: a sled key seems to be of wrong length")
                 }
             }
         }
@@ -335,24 +335,29 @@ pub mod structs {
 
     #[derive(Debug)]
     enum Error {
-        Generic(Box<dyn error::Error>),
-        Crypto(chacha20poly1305::aead::Error),
+        CryptoError(chacha20poly1305::aead::Error),
         DedupError(DedupError),
+        SledError(sled::Error),
+        BincodeError(bincode::ErrorKind),
     }
 
     impl fmt::Display for Error {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
-                Error::Generic(boxed_error) => {
-                    write!(f, "dedup::Error::Generic: ");
-                    let err = &*boxed_error;
-                    err.fmt(f)
-                }
-                Error::Crypto(error) => {
+                Error::CryptoError(error) => {
                     write!(f, "dedup::Error::Crypto: ");
                     error.fmt(f)
                 }
                 Error::DedupError(error) => {
+                    write!(f, "dedup::Error::DedupError: ");
+                    error.fmt(f)
+                }
+                Error::SledError(error) => {
+                    write!(f, "dedup::Error::SledError: ");
+                    error.fmt(f)
+                }
+                Error::BincodeError(error) => {
+                    write!(f, "dedup::Error::BincodeError: ");
                     error.fmt(f)
                 }
             }
@@ -361,9 +366,21 @@ pub mod structs {
 
     impl error::Error for Error {}
 
+    impl std::convert::From<Box<bincode::ErrorKind>> for Error {
+        fn from(err_ptr: Box<bincode::ErrorKind>) -> Self {
+            Error::BincodeError(*err_ptr)
+        }
+    }
+
     impl std::convert::From<chacha20poly1305::aead::Error> for Error {
         fn from(err: chacha20poly1305::aead::Error) -> Self {
-            Error::Crypto(err)
+            Error::CryptoError(err)
+        }
+    }
+
+    impl std::convert::From<sled::Error> for Error {
+        fn from(err: sled::Error) -> Self {
+            Error::SledError(err)
         }
     }
 
@@ -404,8 +421,7 @@ pub mod structs {
         fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
             match self
                 .chunk_map
-                .remove(key)
-                .map_err(|e| Error::Generic(e.into()))?
+                .remove(key)?
             {
                 None => {
                     let file_name = self.unused_paths
@@ -419,8 +435,7 @@ pub mod structs {
                         .insert(
                             key,
                             encrypt_chunk_file(&ChunkFile::fromPathBuf(file_name.clone()))?,
-                        )
-                        .map_err(|e| Error::Generic(e.into()))?;
+                        )?;
 
                     Ok((1u64, file_name))
                 }
@@ -433,8 +448,7 @@ pub mod structs {
                         .insert(
                             key,
                             encrypt_chunk_file(&ChunkFile::new(old.file_name.clone(), ref_count))?,
-                        )
-                        .map_err(|e| Error::Generic(e.into()))?;
+                        )?;
 
                     Ok((ref_count, old.file_name))
                 }
@@ -448,8 +462,7 @@ pub mod structs {
             /// - Returns `Ok((0, file_name))` if the last reference to this chunk was removed indicating that the chunk file should be removed
             match self
                 .chunk_map
-                .remove(key)
-                .map_err(|e| Error::Generic(e.into()))?
+                .remove(key)?
             {
                 None => Ok(None),
                 Some(old) => {
@@ -467,8 +480,7 @@ pub mod structs {
                                     old.file_name.clone(),
                                     ref_count,
                                 ))?,
-                            )
-                            .map_err(|e| Error::Generic(e.into()))?;
+                            )?;
                         Ok(Some((ref_count, old.file_name)))
                     }
                 }
@@ -488,10 +500,10 @@ pub mod structs {
             /// This decrypts all contens creates a compleatly new map in memory
             let mut result = BTreeMap::<ChunkHash, ChunkFile>::new();
             for data in self.chunk_map.iter() {
-                let (key, encrypted_data) = data.map_err(|e| Error::Generic(e.into()))?;
+                let (key, encrypted_data) = data?;
                 let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                 if key.len() != 32 {
-                    return Err(DedupError::ChunkStoreSled("chunk hash has the wrong size, there seems to be garbage in the sled::Tree".to_owned()).into());
+                    return Err(DedupError::SledKeyLengthError.into());
                 } else {
                     let key: ChunkHash = key.chunks_exact(32).next().unwrap().try_into().unwrap();
                     result.insert(key, chunk_file);
@@ -503,8 +515,7 @@ pub mod structs {
         fn get_chunk_file(&self, key: &ChunkHash) -> Result<Option<ChunkFile>> {
             match self
                 .chunk_map
-                .get(key)
-                .map_err(|e| Error::Generic(e.into()))?
+                .get(key)?
             {
                 None => Ok(None),
                 Some(encrypted_data) => {
@@ -554,7 +565,7 @@ pub mod structs {
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(key.into());
         // convert data to Vec<u8>
-        let serialized_data = bincode::serialize(data).map_err(|e| Error::Generic(e.into()))?;
+        let serialized_data = bincode::serialize(data)?;
         // encrypt the data
         let encrypted_data = cipher.encrypt(&nonce.into(), &serialized_data[..])?;
         // construct CryptoCtx using the nonce and the encrypted data
@@ -563,19 +574,19 @@ pub mod structs {
             data: encrypted_data,
         };
         // convert CryptoCtx to Vec<u8>
-        bincode::serialize(&ctx).map_err(|e| Error::Generic(e.into()))
+        Ok(bincode::serialize(&ctx)?)
     }
 
     fn decrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &[u8], key: &EncKey) -> Result<S> {
         /// Generic function to decrypt data encrypted by dedup
         // decode encrypted data to split nonce and encrypted data
-        let ctx = bincode::deserialize::<CryptoCtx>(data).map_err(|e| Error::Generic(e.into()))?;
+        let ctx = bincode::deserialize::<CryptoCtx>(data)?;
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(key.into());
         // decrypt the data
         let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..])?;
         // convert decrypted data to the target data type
-        bincode::deserialize(&decrypted_data).map_err(|e| Error::Generic(e.into()))
+        Ok(bincode::deserialize(&decrypted_data)?)
     }
 
     #[cfg(test)]
