@@ -276,29 +276,37 @@ pub mod structs {
     use sled::transaction::ConflictableTransactionError;
 
     #[derive(Debug)]
-    struct ChunkStoreSled {
+    struct ChunkStore {
         path_gen: FilePathGen,
         unused_paths: Vec<PathBuf>,
         chunk_map: sled::Tree,
     }
 
-    impl ChunkStoreSled {
+    impl ChunkStore {
         fn self_test(&self) -> Result<()> {
             /// Check the ChunkStore contents for errors
             ///
             /// Warning: This is a slow operation
 
-            todo!()
+            for data in self.chunk_map.iter() {
+                let (key, encrypted_data) = data?;
+                // Check key
+                if key.len() != 32 {
+                    return Err(DedupError::SledKeyLengthError.into());
+                }
+                // Check data
+                let _ = decrypt_chunk_file(&encrypted_data)?;
+            }
+            Ok(())
         }
 
-        fn new(tree: sled::Tree) -> Result<ChunkStoreSled> {
-            let cs = ChunkStoreSled {
+        fn new(tree: sled::Tree) -> Result<ChunkStore> {
+            let cs = ChunkStore {
                 path_gen: FilePathGen::default(),
                 unused_paths: Vec::<PathBuf>::default(),
                 chunk_map: tree,
             };
-            // TODO
-            // cs.self_test()?
+            cs.self_test()?;
             Ok(cs)
         }
 
@@ -385,11 +393,11 @@ pub mod structs {
             let mut result = BTreeMap::<ChunkHash, ChunkFile>::new();
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
-                let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                 if key.len() != 32 {
                     return Err(DedupError::SledKeyLengthError.into());
                 } else {
                     let key: ChunkHash = key.chunks_exact(32).next().unwrap().try_into().unwrap();
+                    let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                     result.insert(key, chunk_file);
                 }
             }
@@ -575,14 +583,14 @@ pub mod structs {
         }
 
         #[test]
-        fn test_ChunkStoreSled() {
+        fn test_ChunkStore() {
 
             let key: EncKey = *blake3::hash(b"foobar").as_bytes();
             CHUNK_STORE_KEY.set(key);
             let config = sled::Config::new().temporary(true);
             let db = config.open().unwrap();
 
-            let mut cs = ChunkStoreSled::new(db.open_tree(b"test").unwrap()).unwrap();
+            let mut cs = ChunkStore::new(db.open_tree(b"test").unwrap()).unwrap();
             let h1 = blake3::hash(b"foo");
             let h2 = blake3::hash(b"bar");
             let h3 = blake3::hash(b"baz");
