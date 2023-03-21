@@ -161,149 +161,22 @@ pub mod structs {
 
     impl ChunkFile {
         fn fromPathBuf(file_name: PathBuf) -> ChunkFile {
-            return ChunkFile {
+            ChunkFile {
                 ref_count: 1u64,
                 file_name: file_name,
-            };
+            }
         }
         fn new(file_name: PathBuf, ref_count: u64) -> ChunkFile {
-            return ChunkFile {
+            ChunkFile {
                 ref_count: ref_count,
                 file_name: file_name,
-            };
+            }
         }
         fn ref_count(&self) -> u64 {
             return self.ref_count;
         }
         fn file_name(&self) -> PathBuf {
             return self.file_name.clone();
-        }
-    }
-
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-    pub struct ChunkFileBTreeMap(BTreeMap<ChunkHash, ChunkFile>);
-
-    impl ChunkFileBTreeMap {
-        fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
-            let ref_count = self.get_ref_count(key);
-            match ref_count {
-                0 => None,
-                1 => Some((0, self.0.remove(key)?.file_name)),
-                _ => {
-                    let ref_count = ref_count - 1;
-                    let file_name = self
-                        .get_file_name(key)
-                        .expect("Should never fail!")
-                        .to_path_buf();
-                    self.0
-                        .insert(*key, ChunkFile::new(file_name.clone(), ref_count));
-                    Some((ref_count, file_name))
-                }
-            }
-        }
-
-        fn insert(&mut self, key: &ChunkHash, file_name: PathBuf) -> Option<ChunkFile> {
-            self.0.insert(
-                key.clone(),
-                ChunkFile::new(file_name, self.get_ref_count(key) + 1),
-            )
-        }
-    }
-
-    pub trait ChunkFileMap {
-        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path>;
-        fn get_ref_count(&self, key: &ChunkHash) -> u64;
-        fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile>;
-        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile>;
-        fn len(&self) -> usize;
-    }
-
-    impl ChunkFileMap for ChunkFileBTreeMap {
-        fn len(&self) -> usize {
-            self.0.len()
-        }
-        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
-            &self.0
-        }
-
-        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path> {
-            if let Some(e) = self.get_chunk_file(key) {
-                Some(e.file_name.as_path())
-            } else {
-                None
-            }
-        }
-
-        fn get_ref_count(&self, key: &ChunkHash) -> u64 {
-            if let Some(e) = self.0.get(key) {
-                e.ref_count()
-            } else {
-                0u64
-            }
-        }
-
-        fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
-            self.0.get(key)
-        }
-    }
-
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-    struct ChunkStore {
-        path_gen: FilePathGen,
-        chunkmap: ChunkFileBTreeMap,
-        unused_paths: Vec<PathBuf>,
-    }
-
-    impl ChunkStore {
-        fn new() -> ChunkStore {
-            ChunkStore::default()
-        }
-        fn insert(&mut self, key: &ChunkHash) -> (u64, PathBuf) {
-            let mut file_name = PathBuf::default();
-            let ref_count = self.chunkmap.get_ref_count(key) + 1;
-            if let Some(name) = self.chunkmap.get_file_name(key) {
-                file_name = name.to_path_buf();
-            } else {
-                file_name = self
-                    .unused_paths
-                    .pop()
-                    .unwrap_or_else(|| match self.path_gen.next() {
-                        Some(name) => PathBuf::from(name),
-                        None => {
-                            todo!("Error Handling: Please contact me if use more than 10^19 chunks, I would really like to know the system you are on")
-                        }
-                    })
-            }
-            self.chunkmap.insert(key, file_name.clone());
-            (ref_count, file_name)
-        }
-        fn remove(&mut self, key: &ChunkHash) -> Option<(u64, PathBuf)> {
-            let (ref_count, file_name) = self.chunkmap.remove(key)?;
-            if ref_count == 0 {
-                self.unused_paths.push(file_name.clone())
-            }
-            Some((ref_count, file_name))
-        }
-        fn get_unused(&self) -> &Vec<PathBuf> {
-            &self.unused_paths
-        }
-    }
-
-    impl ChunkFileMap for ChunkStore {
-        fn len(&self) -> usize {
-            self.chunkmap.len()
-        }
-        fn get_mappings(&self) -> &BTreeMap<ChunkHash, ChunkFile> {
-            self.chunkmap.get_mappings()
-        }
-        fn get_file_name(&self, key: &ChunkHash) -> Option<&Path> {
-            self.chunkmap.get_file_name(key)
-        }
-        fn get_ref_count(&self, key: &ChunkHash) -> u64 {
-            self.chunkmap.get_ref_count(key)
-        }
-        fn get_chunk_file(&self, key: &ChunkHash) -> Option<&ChunkFile> {
-            self.chunkmap.get_chunk_file(key)
         }
     }
 
@@ -685,27 +558,6 @@ pub mod structs {
             assert_eq!(cs.remove(h1.as_bytes()).unwrap(), None);
 
             assert_eq!(cs.insert(h4.as_bytes()).unwrap(), (1, PathBuf::from("1.bin")));
-        }
-
-        #[test]
-        fn test_ChunkStore() {
-            let mut cs = ChunkStore::new();
-            let h1 = blake3::hash(b"foo");
-            let h2 = blake3::hash(b"bar");
-            let h3 = blake3::hash(b"baz");
-            let h4 = blake3::hash(b"foobar");
-
-            assert_eq!(cs.insert(h1.as_bytes()), (1, PathBuf::from("1.bin")));
-            assert_eq!(cs.insert(h2.as_bytes()), (1, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()), (1, PathBuf::from("3.bin")));
-
-            assert_eq!(cs.insert(h2.as_bytes()), (2, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()), (2, PathBuf::from("3.bin")));
-
-            assert_eq!(cs.remove(h1.as_bytes()), Some((0, PathBuf::from("1.bin"))));
-            assert_eq!(cs.remove(h1.as_bytes()), None);
-
-            assert_eq!(cs.insert(h4.as_bytes()), (1, PathBuf::from("1.bin")));
         }
     }
 }
