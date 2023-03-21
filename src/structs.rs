@@ -2,6 +2,10 @@ pub mod structs {
     use std::collections::{HashMap, BTreeMap};
     use std::path::PathBuf;
     use once_cell::sync::OnceCell;
+    use serde::{Deserialize, Serialize};
+    use flate2::write::{DeflateDecoder, DeflateEncoder};
+    use flate2::Compression;
+    use std::io::prelude::*;
 
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
@@ -21,7 +25,7 @@ pub mod structs {
     pub static INODE_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
 
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Metadata {
         mode: u32,
         uid: u32,
@@ -32,24 +36,24 @@ pub mod structs {
         ctime_ns: i64,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct ChunkerConf {
         minimum_chunk_size: usize,
         average_chunk_size: usize,
         maximum_chunk_size: usize,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Manifest {
         salt: [u8; 32],
-        chunk_root_dir: std::path::PathBuf,
-        backup_db_path: std::path::PathBuf,
-        inode_db_path: std::path::PathBuf,
+        chunk_root_dir: PathBuf,
+        backup_db_path: PathBuf,
+        inode_db_path: PathBuf,
         version: String,
         chunker_conf: ChunkerConf,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct RuntimeConf {
         manifest_sig_key: SigKey,
         chunk_encryption_key: EncKey,
@@ -61,42 +65,42 @@ pub mod structs {
 
     type EncBackups = BTreeMap<EncNonce, Vec<u8>>;
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Backup {
         timestamp: String,
         name: String,
         root: InodeHash,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Symlink {
-        relpath: std::path::PathBuf,
-        target: std::path::PathBuf,
+        relpath: PathBuf,
+        target: PathBuf,
         metadata: Metadata,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Directory {
-        relpath: std::path::PathBuf,
+        relpath: PathBuf,
         metadata: Metadata,
         contents: Vec<InodeHash>,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct File {
-        relpath: std::path::PathBuf,
+        relpath: PathBuf,
         chunk_ids: Vec<ChunkHash>,
         metadata: Metadata,
     }
 
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     enum Inode {
         File,
         Directory,
         Symlink,
     }
 
-    trait Hashable: serde::Serialize {
+    trait Hashable: Serialize {
         fn hash(&self) -> Result<blake3::Hash> {
             let serialized = bincode::serialize(self)?;
             Ok(blake3::hash(&serialized))
@@ -112,14 +116,14 @@ pub mod structs {
 
     type EncInodes = HashMap<InodeHash, (EncNonce, Vec<u8>)>;
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct EncChunk {
         hash: ChunkHash,
         nonce: EncNonce,
         chunk: Chunk,
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Chunk {
         data: Vec<u8>,
     }
@@ -132,7 +136,7 @@ pub mod structs {
         }
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct FilePathGen(u64);
     impl FilePathGen {
         pub fn new() -> FilePathGen {
@@ -178,10 +182,10 @@ pub mod structs {
         }
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct ChunkFile {
         ref_count: u64,
-        file_name: std::path::PathBuf,
+        file_name: PathBuf,
     }
 
     impl ChunkFile {
@@ -205,7 +209,7 @@ pub mod structs {
         }
     }
 
-    #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct CryptoCtx {
         nonce: EncNonce,
         data: Vec<u8>,
@@ -213,7 +217,7 @@ pub mod structs {
 
     use std::{error, fmt};
 
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub enum DedupError {
         SledKeyLengthError,
     }
@@ -237,6 +241,7 @@ pub mod structs {
         DedupError(DedupError),
         SledError(sled::Error),
         BincodeError(bincode::ErrorKind),
+        IoError(std::io::Error),
     }
 
     impl fmt::Display for Error {
@@ -256,6 +261,10 @@ pub mod structs {
                 }
                 Error::BincodeError(error) => {
                     write!(f, "dedup::Error::BincodeError: ");
+                    error.fmt(f)
+                }
+                Error::IoError(error) => {
+                    write!(f, "dedup::Error::IoError: ");
                     error.fmt(f)
                 }
             }
@@ -285,6 +294,12 @@ pub mod structs {
     impl std::convert::From<DedupError> for Error {
         fn from(err: DedupError) -> Self {
             Error::DedupError(err)
+        }
+    }
+
+    impl std::convert::From<std::io::Error> for Error {
+        fn from(err: std::io::Error) -> Self {
+            Error::IoError(err)
         }
     }
 
@@ -471,7 +486,6 @@ pub mod structs {
         )
     }
 
-    use serde::{Deserialize, Serialize};
     fn encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
         /// Generic function to encrypt data in dedup
         // generate nonce
@@ -501,6 +515,49 @@ pub mod structs {
         let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..])?;
         // convert decrypted data to the target data type
         Ok(bincode::deserialize(&decrypted_data)?)
+    }
+
+    fn compress_and_encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
+        /// Generic function to compress and encrypt data in dedup
+
+
+        // generate nonce
+        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+        // setup the cipher
+        let cipher = XChaCha20Poly1305::new(key.into());
+        // convert data to Vec<u8>
+        let serialized_data = bincode::serialize(data)?;
+
+        // compress the data
+        let mut compressor = DeflateEncoder::new(Vec::new(), Compression::default());
+        compressor.write_all(&serialized_data[..])?;
+        let compressed_data = compressor.finish()?;
+        // encrypt the data
+        let encrypted_data = cipher.encrypt(&nonce.into(), &compressed_data[..])?;
+        // construct CryptoCtx using the nonce and the encrypted data
+        let ctx = CryptoCtx {
+            nonce,
+            data: encrypted_data,
+        };
+        // convert CryptoCtx to Vec<u8>
+        Ok(bincode::serialize(&ctx)?)
+    }
+
+    fn decrypt_and_uncompress<S: Serialize + for<'a> Deserialize<'a>>(data: &[u8], key: &EncKey) -> Result<S> {
+        /// Generic function to decrypt and uncompress data encrypted by dedup
+        // decode encrypted data to split nonce and encrypted data
+        let ctx = bincode::deserialize::<CryptoCtx>(data)?;
+        // setup the cipher
+        let cipher = XChaCha20Poly1305::new(key.into());
+        // decrypt the data
+        let decrypted_data = cipher.decrypt(&ctx.nonce.into(), &ctx.data[..])?;
+        // decompress decrypted data
+        let mut uncompressed_data = Vec::new();
+        let mut deflater = DeflateDecoder::new(uncompressed_data);
+        deflater.write_all(&decrypted_data)?;
+        uncompressed_data = deflater.finish()?;
+        // deserialize uncompressed data
+        Ok(bincode::deserialize(&uncompressed_data)?)
     }
 
 
@@ -582,6 +639,55 @@ pub mod structs {
         use super::*;
 
         #[test]
+        fn test_compressed_encryption_success() {
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
+
+            let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
+            let dec: Chunk = decrypt_and_uncompress(&enc, &key.into()).unwrap();
+            println!("0: size data uncompressed: {}", testdata.data.len());
+            println!("0: size data compressed and encrypted: {}", enc.len());
+            assert_eq!(testdata, dec);
+        }
+
+        #[test]
+        fn test_compressed_encryption_fail_tempering() {
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
+
+            let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let mut enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
+            let last = enc.pop().unwrap();
+            enc.push(!last);
+
+            let dec: Result<Chunk> = decrypt_and_uncompress(&enc, &key.into());
+            assert!(dec.is_err());
+        }
+
+        #[test]
+        fn test_compressed_encryption_fail_key() {
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
+
+            let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
+            key[0] = !key[0];
+
+            let dec: Result<Chunk> = decrypt_and_uncompress(&enc, &key.into());
+            assert!(dec.is_err());
+        }
+
+        #[test]
         fn test_encryption_success() {
             let testdata = Chunk {
                 data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
@@ -589,6 +695,8 @@ pub mod structs {
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = encrypt(&testdata, &key.into()).unwrap();
             let dec: Chunk = decrypt(&enc, &key.into()).unwrap();
+            println!("1: size data uncompressed: {}", testdata.data.len());
+            println!("1: size data encrypted: {}", enc.len());
             assert_eq!(testdata, dec);
         }
 
