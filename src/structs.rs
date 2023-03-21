@@ -283,12 +283,23 @@ pub mod structs {
     }
 
     impl ChunkStoreSled {
-        fn new(tree: sled::Tree) -> ChunkStoreSled {
-            ChunkStoreSled {
+        fn self_test(&self) -> Result<()> {
+            /// Check the ChunkStore contents for errors
+            ///
+            /// Warning: This is a slow operation
+
+            todo!()
+        }
+
+        fn new(tree: sled::Tree) -> Result<ChunkStoreSled> {
+            let cs = ChunkStoreSled {
                 path_gen: FilePathGen::default(),
                 unused_paths: Vec::<PathBuf>::default(),
                 chunk_map: tree,
-            }
+            };
+            // TODO
+            // cs.self_test()?
+            Ok(cs)
         }
 
         fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
@@ -462,6 +473,36 @@ pub mod structs {
         Ok(bincode::deserialize(&decrypted_data)?)
     }
 
+
+    #[derive(Debug)]
+    struct InodeDb(sled::Tree);
+
+    impl InodeDb{
+        fn self_test(&self) -> Result<()> {
+            todo!()
+        }
+
+        fn new(&mut self, tree: sled::Tree) -> Result<InodeDb>{
+            todo!()
+        }
+
+        fn insert(&mut self, key: InodeHash, inode: Inode) -> Result<()> {
+            todo!()
+        }
+
+        fn remove(&mut self, key: InodeHash) -> Result<Inode> {
+            todo!()
+        }
+
+        fn get_inode(&self, key: InodeHash) -> Result<Inode> {
+            todo!()
+        }
+
+        fn get_mappings(&self) -> Result<BTreeMap<InodeHash, Inode>> {
+            todo!()
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -541,7 +582,7 @@ pub mod structs {
             let config = sled::Config::new().temporary(true);
             let db = config.open().unwrap();
 
-            let mut cs = ChunkStoreSled::new(db.open_tree(b"test").unwrap());
+            let mut cs = ChunkStoreSled::new(db.open_tree(b"test").unwrap()).unwrap();
             let h1 = blake3::hash(b"foo");
             let h2 = blake3::hash(b"bar");
             let h3 = blake3::hash(b"baz");
