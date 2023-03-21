@@ -1,7 +1,7 @@
 pub mod structs {
-    use std::collections::BTreeMap;
-    use std::collections::{HashMap, HashSet};
-    use std::path::{Path, PathBuf};
+    use std::collections::{HashMap, BTreeMap};
+    use std::path::PathBuf;
+    use once_cell::sync::OnceCell;
 
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
@@ -15,14 +15,21 @@ pub mod structs {
     type HashKey = [u8; KEY_SIZE];
     type SigKey = [u8; KEY_SIZE];
 
+    pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
+    pub static CHUNK_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
+    pub static INODE_DB_KEY: OnceCell<EncKey> = OnceCell::new();
+    pub static INODE_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
+
+
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     struct Metadata {
         mode: u32,
         uid: u32,
         gid: u32,
-        atime: i64,
         mtime: i64,
+        mtime_ns: i64,
         ctime: i64,
+        ctime_ns: i64,
     }
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -58,7 +65,7 @@ pub mod structs {
     struct Backup {
         timestamp: String,
         name: String,
-        root: Directory,
+        root: InodeHash,
     }
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -88,6 +95,20 @@ pub mod structs {
         Directory,
         Symlink,
     }
+
+    trait Hashable: serde::Serialize {
+        fn hash(&self) -> Result<blake3::Hash> {
+            let serialized = bincode::serialize(self)?;
+            Ok(blake3::hash(&serialized))
+        }
+
+        fn keyed_hash(&self, key: &HashKey) -> Result<blake3::Hash> {
+            let serialized = bincode::serialize(self)?;
+            Ok(blake3::keyed_hash(key, &serialized))
+        }
+    }
+
+    impl Hashable for Inode {}
 
     type EncInodes = HashMap<InodeHash, (EncNonce, Vec<u8>)>;
 
@@ -193,7 +214,7 @@ pub mod structs {
     use std::{error, fmt};
 
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-    enum DedupError {
+    pub enum DedupError {
         SledKeyLengthError,
     }
 
@@ -211,7 +232,7 @@ pub mod structs {
 
 
     #[derive(Debug)]
-    enum Error {
+    pub enum Error {
         CryptoError(chacha20poly1305::aead::Error),
         DedupError(DedupError),
         SledError(sled::Error),
@@ -273,11 +294,7 @@ pub mod structs {
         aead::{Aead, AeadCore, KeyInit, OsRng},
         Nonce, XChaCha20Poly1305,
     };
-    use once_cell::sync::OnceCell;
 
-    pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
-
-    use sled::transaction::ConflictableTransactionError;
 
     #[derive(Debug)]
     struct ChunkStore {
@@ -295,7 +312,7 @@ pub mod structs {
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
                 // Check key
-                if key.len() != 32 {
+                if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 }
                 // Check data
@@ -487,32 +504,75 @@ pub mod structs {
     }
 
 
+
     #[derive(Debug)]
     struct InodeDb(sled::Tree);
 
     impl InodeDb{
         pub fn self_test(&self) -> Result<()> {
-            todo!()
+            for data in self.0.iter() {
+                let (key, encrypted_data) = data?;
+
+                if key.len() != HASH_SIZE {
+                    return Err(DedupError::SledKeyLengthError.into());
+                }
+                // Check data
+                let _: Inode = decrypt(&encrypted_data,INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+            }
+            Ok(())
         }
 
-        pub fn new(&mut self, tree: sled::Tree) -> Result<InodeDb>{
-            todo!()
+        pub fn new(tree: sled::Tree) -> Result<InodeDb>{
+            let db = InodeDb{ 0: tree };
+            db.self_test()?;
+            Ok(db)
         }
 
-        pub fn insert(&mut self, key: InodeHash, inode: Inode) -> Result<()> {
-            todo!()
+        pub fn insert(&mut self, inode: Inode) -> Result<(bool, InodeHash)> {
+            let hash: InodeHash = *inode.keyed_hash(INODE_HASH_KEY.get().expect("INODE_HASH_KEY should be initialized!"))?.as_bytes();
+            match self.0.get(&hash)? {
+                Some(_data) => { Ok((true, hash)) }
+                None => {
+                    let encrypted_inode = encrypt(&inode, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+                    self.0.insert(&hash, &encrypted_inode[..])?;
+                    Ok((false, hash))
+                }
+            }
         }
 
-        pub fn remove(&mut self, key: InodeHash) -> Result<Inode> {
-            todo!()
+        pub fn remove(&mut self, key: &InodeHash) -> Result<Option<Inode>> {
+            match self.0.remove(key)? {
+                None => { Ok(None) }
+                Some(encrypted_data) => {
+                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+                    Ok(Some(inode))
+                }
+            }
         }
 
-        pub fn get_inode(&self, key: InodeHash) -> Result<Inode> {
-            todo!()
+        pub fn get_inode(&self, key: InodeHash) -> Result<Option<Inode>> {
+            match self.0.get(key)? {
+                None => { Ok(None) }
+                Some(encrypted_data) => {
+                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+                    Ok(Some(inode))
+                }
+            }
         }
 
         pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, Inode>> {
-            todo!()
+            let mut result = BTreeMap::<InodeHash, Inode>::new();
+            for data in self.0.iter() {
+                let (key, encrypted_data) = data?;
+                if key.len() != HASH_SIZE {
+                    return Err(DedupError::SledKeyLengthError.into());
+                } else {
+                    let hash: ChunkHash = key.chunks_exact(HASH_SIZE).next().unwrap().try_into().unwrap();
+                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+                    result.insert(hash, inode);
+                }
+            }
+            Ok(result)
         }
     }
 
