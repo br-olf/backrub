@@ -287,7 +287,7 @@ pub mod structs {
     }
 
     impl ChunkStore {
-        fn self_test(&self) -> Result<()> {
+        pub fn self_test(&self) -> Result<()> {
             /// Check the ChunkStore contents for errors
             ///
             /// This is a O(n) operation
@@ -304,7 +304,7 @@ pub mod structs {
             Ok(())
         }
 
-        fn new(tree: sled::Tree) -> Result<ChunkStore> {
+        pub fn new(tree: sled::Tree) -> Result<ChunkStore> {
             let cs = ChunkStore {
                 path_gen: FilePathGen::default(),
                 unused_paths: Vec::<PathBuf>::default(),
@@ -314,7 +314,7 @@ pub mod structs {
             Ok(cs)
         }
 
-        fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
+        pub fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
             match self
                 .chunk_map
                 .remove(key)?
@@ -351,7 +351,7 @@ pub mod structs {
             }
         }
 
-        fn remove(&mut self, key: &ChunkHash) -> Result<Option<(u64, PathBuf)>> {
+        pub fn remove(&mut self, key: &ChunkHash) -> Result<Option<(u64, PathBuf)>> {
             /// Removes a chunk reference and returns the reference count as well as the file name the chunk is supposed to be stored in.
             ///
             /// - Returns `Ok(None)` if chunk was not referenced (no file name is associated with that chunk hash)
@@ -383,14 +383,14 @@ pub mod structs {
             }
         }
 
-        fn len(&self) -> usize {
+        pub fn len(&self) -> usize {
             /// Returns the number of stored chunks
             ///
             /// This performs a full O(n) scan
             self.chunk_map.len()
         }
 
-        fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, ChunkFile>> {
+        pub fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, ChunkFile>> {
             /// Returns a BTreeMap containing the contens of the internal mappings.
             ///
             /// This decrypts all contens creates a compleatly new map in memory
@@ -408,7 +408,7 @@ pub mod structs {
             Ok(result)
         }
 
-        fn get_chunk_file(&self, key: &ChunkHash) -> Result<Option<ChunkFile>> {
+        pub fn get_chunk_file(&self, key: &ChunkHash) -> Result<Option<ChunkFile>> {
             match self
                 .chunk_map
                 .get(key)?
@@ -420,14 +420,15 @@ pub mod structs {
                 }
             }
         }
-        fn get_ref_count(&self, key: &ChunkHash) -> Result<u64> {
+
+        pub fn get_ref_count(&self, key: &ChunkHash) -> Result<u64> {
             match self.get_chunk_file(key)? {
                 None => Ok(0u64),
                 Some(chunk_file) => Ok(chunk_file.ref_count),
             }
         }
 
-        fn get_file_name(&self, key: &ChunkHash) -> Result<Option<PathBuf>> {
+        pub fn get_file_name(&self, key: &ChunkHash) -> Result<Option<PathBuf>> {
             match self.get_chunk_file(key)? {
                 None => Ok(None),
                 Some(chunk_file) => Ok(Some(chunk_file.file_name)),
@@ -490,27 +491,27 @@ pub mod structs {
     struct InodeDb(sled::Tree);
 
     impl InodeDb{
-        fn self_test(&self) -> Result<()> {
+        pub fn self_test(&self) -> Result<()> {
             todo!()
         }
 
-        fn new(&mut self, tree: sled::Tree) -> Result<InodeDb>{
+        pub fn new(&mut self, tree: sled::Tree) -> Result<InodeDb>{
             todo!()
         }
 
-        fn insert(&mut self, key: InodeHash, inode: Inode) -> Result<()> {
+        pub fn insert(&mut self, key: InodeHash, inode: Inode) -> Result<()> {
             todo!()
         }
 
-        fn remove(&mut self, key: InodeHash) -> Result<Inode> {
+        pub fn remove(&mut self, key: InodeHash) -> Result<Inode> {
             todo!()
         }
 
-        fn get_inode(&self, key: InodeHash) -> Result<Inode> {
+        pub fn get_inode(&self, key: InodeHash) -> Result<Inode> {
             todo!()
         }
 
-        fn get_mappings(&self) -> Result<BTreeMap<InodeHash, Inode>> {
+        pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, Inode>> {
             todo!()
         }
     }
