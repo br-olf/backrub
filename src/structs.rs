@@ -3,13 +3,17 @@ pub mod structs {
     use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
 
-    type ChunkHash = [u8; 32];
-    type InodeHash = [u8; 32];
-    //type BackupHash = [u8; 32];
-    type EncNonce = [u8; 24];
-    type EncKey = [u8; 32];
-    type HashKey = [u8; 32];
-    type SigKey = [u8; 32];
+    const HASH_SIZE: usize = 32;
+    const KEY_SIZE: usize = 32;
+    const NONCE_SIZE: usize = 24;
+
+    type ChunkHash = [u8; HASH_SIZE];
+    type InodeHash = [u8; HASH_SIZE];
+    //type BackupHash = [u8; HASH_SIZE];
+    type EncNonce = [u8; NONCE_SIZE];
+    type EncKey = [u8; KEY_SIZE];
+    type HashKey = [u8; KEY_SIZE];
+    type SigKey = [u8; KEY_SIZE];
 
     #[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
     struct Metadata {
@@ -286,7 +290,7 @@ pub mod structs {
         fn self_test(&self) -> Result<()> {
             /// Check the ChunkStore contents for errors
             ///
-            /// Warning: This is a slow operation
+            /// This is a O(n) operation
 
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
@@ -393,10 +397,10 @@ pub mod structs {
             let mut result = BTreeMap::<ChunkHash, ChunkFile>::new();
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
-                if key.len() != 32 {
+                if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 } else {
-                    let key: ChunkHash = key.chunks_exact(32).next().unwrap().try_into().unwrap();
+                    let key: ChunkHash = key.chunks_exact(HASH_SIZE).next().unwrap().try_into().unwrap();
                     let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                     result.insert(key, chunk_file);
                 }
