@@ -637,6 +637,7 @@ pub mod structs {
     mod tests {
         // Note this useful idiom: importing names from outer (for mod tests) scope.
         use super::*;
+        use std::time::{Duration, Instant};
 
         #[test]
         fn test_compressed_encryption_success() {
@@ -645,12 +646,18 @@ pub mod structs {
                 for i in 0..5 {data.push(i);}
             }
             let testdata = Chunk {data};
-
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+
+            let now = Instant::now();
+
             let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
             let dec: Chunk = decrypt_and_uncompress(&enc, &key.into()).unwrap();
+
+            let elapsed = now.elapsed();
+
             println!("0: size data uncompressed: {}", testdata.data.len());
             println!("0: size data compressed and encrypted: {}", enc.len());
+            println!("0: runtime in nanoseconds: {}", elapsed.as_nanos());
             assert_eq!(testdata, dec);
         }
 
@@ -689,22 +696,33 @@ pub mod structs {
 
         #[test]
         fn test_encryption_success() {
-            let testdata = Chunk {
-                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
-            };
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+
+            let now = Instant::now();
+
             let enc = encrypt(&testdata, &key.into()).unwrap();
             let dec: Chunk = decrypt(&enc, &key.into()).unwrap();
+
+            let elapsed = now.elapsed();
+
             println!("1: size data uncompressed: {}", testdata.data.len());
             println!("1: size data encrypted: {}", enc.len());
+            println!("1: runtime in nanoseconds: {}", elapsed.as_nanos());
             assert_eq!(testdata, dec);
         }
 
         #[test]
         fn test_encryption_fail_tempering() {
-            let testdata = Chunk {
-                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
-            };
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let mut enc = encrypt(&testdata, &key.into()).unwrap();
             let last = enc.pop().unwrap();
@@ -716,9 +734,11 @@ pub mod structs {
 
         #[test]
         fn test_encryption_fail_key() {
-            let testdata = Chunk {
-                data: vec![1u8, 2u8, 3u8, 4u8, 5u8],
-            };
+            let mut data = Vec::<u8>::new();
+            for n in 0..1024*1024 {
+                for i in 0..5 {data.push(i);}
+            }
+            let testdata = Chunk {data};
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = encrypt(&testdata, &key.into()).unwrap();
             key[0] = !key[0];

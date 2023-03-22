@@ -44,3 +44,7 @@ once_cell = "1.17.1"
 [profile.release]
 opt-level = 3  # Optimize for speed.
 strip = true  # Automatically strip symbols from the binary.
+
+[profile.test]
+opt-level = 3
+strip = true
