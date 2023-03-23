@@ -1,15 +1,17 @@
 pub mod structs {
-    use std::collections::{HashMap, BTreeMap};
-    use std::path::PathBuf;
-    use once_cell::sync::OnceCell;
-    use serde::{Deserialize, Serialize};
     use flate2::write::{DeflateDecoder, DeflateEncoder};
     use flate2::Compression;
+    use once_cell::sync::OnceCell;
+    use serde::{Deserialize, Serialize};
+    use std::collections::{BTreeMap, HashMap};
     use std::io::prelude::*;
+    use std::path::PathBuf;
 
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
     const NONCE_SIZE: usize = 24;
+
+    type RefCount = usize;
 
     type ChunkHash = [u8; HASH_SIZE];
     type InodeHash = [u8; HASH_SIZE];
@@ -23,7 +25,6 @@ pub mod structs {
     pub static CHUNK_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
     pub static INODE_DB_KEY: OnceCell<EncKey> = OnceCell::new();
     pub static INODE_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
-
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Metadata {
@@ -95,9 +96,23 @@ pub mod structs {
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     enum Inode {
-        File,
-        Directory,
-        Symlink,
+        File(File),
+        Directory(Directory),
+        Symlink(Symlink),
+    }
+
+    impl Hashable for Inode {}
+
+    impl Inode {
+        fn db_hash(&self) -> Result<InodeHash> {
+            Ok(*self
+                .keyed_hash(
+                    INODE_HASH_KEY
+                        .get()
+                        .expect("INODE_HASH_KEY should be initialized!"),
+                )?
+                .as_bytes())
+        }
     }
 
     trait Hashable: Serialize {
@@ -112,21 +127,12 @@ pub mod structs {
         }
     }
 
-    impl Hashable for Inode {}
-
-    type EncInodes = HashMap<InodeHash, (EncNonce, Vec<u8>)>;
-
-    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct EncChunk {
-        hash: ChunkHash,
-        nonce: EncNonce,
-        chunk: Chunk,
-    }
-
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Chunk {
         data: Vec<u8>,
     }
+
+    impl Hashable for Chunk {}
 
     pub fn log2u64(x: u64) -> Option<u64> {
         if x > 0 {
@@ -183,30 +189,9 @@ pub mod structs {
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct ChunkFile {
-        ref_count: u64,
+    pub struct ChunkStoreEntry {
+        ref_count: RefCount,
         file_name: PathBuf,
-    }
-
-    impl ChunkFile {
-        fn fromPathBuf(file_name: PathBuf) -> ChunkFile {
-            ChunkFile {
-                ref_count: 1u64,
-                file_name: file_name,
-            }
-        }
-        fn new(file_name: PathBuf, ref_count: u64) -> ChunkFile {
-            ChunkFile {
-                ref_count: ref_count,
-                file_name: file_name,
-            }
-        }
-        fn ref_count(&self) -> u64 {
-            return self.ref_count;
-        }
-        fn file_name(&self) -> PathBuf {
-            return self.file_name.clone();
-        }
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -226,14 +211,16 @@ pub mod structs {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
                 DedupError::SledKeyLengthError => {
-                    write!(f, "SledKeyLengthError: a sled key seems to be of wrong length")
+                    write!(
+                        f,
+                        "SledKeyLengthError: a sled key seems to be of wrong length"
+                    )
                 }
             }
         }
     }
 
     impl error::Error for DedupError {}
-
 
     #[derive(Debug)]
     pub enum Error {
@@ -310,7 +297,6 @@ pub mod structs {
         Nonce, XChaCha20Poly1305,
     };
 
-
     #[derive(Debug)]
     struct ChunkStore {
         path_gen: FilePathGen,
@@ -323,7 +309,6 @@ pub mod structs {
             /// Check the ChunkStore contents for errors
             ///
             /// This is a O(n) operation
-
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
                 // Check key
@@ -346,11 +331,8 @@ pub mod structs {
             Ok(cs)
         }
 
-        pub fn insert(&mut self, key: &ChunkHash) -> Result<(u64, PathBuf)> {
-            match self
-                .chunk_map
-                .remove(key)?
-            {
+        pub fn insert(&mut self, key: &ChunkHash) -> Result<(RefCount, PathBuf)> {
+            match self.chunk_map.remove(key)? {
                 None => {
                     let file_name = self.unused_paths
                                          .pop()
@@ -359,56 +341,56 @@ pub mod structs {
                                                            .expect("BUG: Please contact me if you need more than 10^19 chunks, I'd really like to know the system you are on"))
                     });
 
-                    self.chunk_map
-                        .insert(
-                            key,
-                            encrypt_chunk_file(&ChunkFile::fromPathBuf(file_name.clone()))?,
-                        )?;
+                    self.chunk_map.insert(
+                        key,
+                        encrypt_chunk_file(&ChunkStoreEntry {
+                            file_name: file_name.clone(),
+                            ref_count: 1,
+                        })?,
+                    )?;
 
-                    Ok((1u64, file_name))
+                    Ok((1, file_name))
                 }
                 Some(old) => {
                     let old = decrypt_chunk_file(&old)?;
 
                     let ref_count = old.ref_count + 1;
 
-                    self.chunk_map
-                        .insert(
-                            key,
-                            encrypt_chunk_file(&ChunkFile::new(old.file_name.clone(), ref_count))?,
-                        )?;
+                    self.chunk_map.insert(
+                        key,
+                        encrypt_chunk_file(&ChunkStoreEntry {
+                            file_name: old.file_name.clone(),
+                            ref_count,
+                        })?,
+                    )?;
 
                     Ok((ref_count, old.file_name))
                 }
             }
         }
 
-        pub fn remove(&mut self, key: &ChunkHash) -> Result<Option<(u64, PathBuf)>> {
+        pub fn remove(&mut self, key: &ChunkHash) -> Result<Option<(RefCount, PathBuf)>> {
             /// Removes a chunk reference and returns the reference count as well as the file name the chunk is supposed to be stored in.
             ///
             /// - Returns `Ok(None)` if chunk was not referenced (no file name is associated with that chunk hash)
             /// - Returns `Ok((0, file_name))` if the last reference to this chunk was removed indicating that the chunk file should be removed
-            match self
-                .chunk_map
-                .remove(key)?
-            {
+            match self.chunk_map.remove(key)? {
                 None => Ok(None),
                 Some(old) => {
                     let old = decrypt_chunk_file(&old)?;
                     if old.ref_count <= 1 {
                         // save old file name for reuse
                         self.unused_paths.push(old.file_name.clone());
-                        Ok(Some((0u64, old.file_name)))
+                        Ok(Some((0, old.file_name)))
                     } else {
                         let ref_count = old.ref_count - 1;
-                        self.chunk_map
-                            .insert(
-                                key,
-                                encrypt_chunk_file(&ChunkFile::new(
-                                    old.file_name.clone(),
-                                    ref_count,
-                                ))?,
-                            )?;
+                        self.chunk_map.insert(
+                            key,
+                            encrypt_chunk_file(&ChunkStoreEntry {
+                                file_name: old.file_name.clone(),
+                                ref_count,
+                            })?,
+                        )?;
                         Ok(Some((ref_count, old.file_name)))
                     }
                 }
@@ -422,53 +404,55 @@ pub mod structs {
             self.chunk_map.len()
         }
 
-        pub fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, ChunkFile>> {
+        pub fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, (RefCount, PathBuf)>> {
             /// Returns a BTreeMap containing the contens of the internal mappings.
             ///
             /// This decrypts all contens creates a compleatly new map in memory
-            let mut result = BTreeMap::<ChunkHash, ChunkFile>::new();
+            let mut result = BTreeMap::<ChunkHash, (RefCount, PathBuf)>::new();
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
                 if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 } else {
-                    let key: ChunkHash = key.chunks_exact(HASH_SIZE).next().unwrap().try_into().unwrap();
+                    let key: ChunkHash = key
+                        .chunks_exact(HASH_SIZE)
+                        .next()
+                        .unwrap()
+                        .try_into()
+                        .unwrap();
                     let chunk_file = decrypt_chunk_file(&encrypted_data)?;
-                    result.insert(key, chunk_file);
+                    result.insert(key, (chunk_file.ref_count, chunk_file.file_name));
                 }
             }
             Ok(result)
         }
 
-        pub fn get_chunk_file(&self, key: &ChunkHash) -> Result<Option<ChunkFile>> {
-            match self
-                .chunk_map
-                .get(key)?
-            {
+        pub fn get_entry(&self, key: &ChunkHash) -> Result<Option<(RefCount, PathBuf)>> {
+            match self.chunk_map.get(key)? {
                 None => Ok(None),
                 Some(encrypted_data) => {
                     let chunk_file = decrypt_chunk_file(&encrypted_data)?;
-                    Ok(Some(chunk_file))
+                    Ok(Some((chunk_file.ref_count, chunk_file.file_name)))
                 }
             }
         }
 
-        pub fn get_ref_count(&self, key: &ChunkHash) -> Result<u64> {
-            match self.get_chunk_file(key)? {
-                None => Ok(0u64),
-                Some(chunk_file) => Ok(chunk_file.ref_count),
+        pub fn get_ref_count(&self, key: &ChunkHash) -> Result<Option<RefCount>> {
+            match self.get_entry(key)? {
+                None => Ok(None),
+                Some((ref_count, _file_name)) => Ok(Some(ref_count)),
             }
         }
 
         pub fn get_file_name(&self, key: &ChunkHash) -> Result<Option<PathBuf>> {
-            match self.get_chunk_file(key)? {
+            match self.get_entry(key)? {
                 None => Ok(None),
-                Some(chunk_file) => Ok(Some(chunk_file.file_name)),
+                Some((_ref_count, file_name)) => Ok(Some(file_name)),
             }
         }
     }
 
-    fn encrypt_chunk_file(chunk_file: &ChunkFile) -> Result<Vec<u8>> {
+    fn encrypt_chunk_file(chunk_file: &ChunkStoreEntry) -> Result<Vec<u8>> {
         encrypt(
             chunk_file,
             CHUNK_STORE_KEY
@@ -477,7 +461,7 @@ pub mod structs {
         )
     }
 
-    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkFile> {
+    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkStoreEntry> {
         decrypt(
             encrypted_data,
             CHUNK_STORE_KEY
@@ -517,10 +501,11 @@ pub mod structs {
         Ok(bincode::deserialize(&decrypted_data)?)
     }
 
-    fn compress_and_encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
+    fn compress_and_encrypt<S: Serialize + for<'a> Deserialize<'a>>(
+        data: &S,
+        key: &EncKey,
+    ) -> Result<Vec<u8>> {
         /// Generic function to compress and encrypt data in dedup
-
-
         // generate nonce
         let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         // setup the cipher
@@ -543,7 +528,10 @@ pub mod structs {
         Ok(bincode::serialize(&ctx)?)
     }
 
-    fn decrypt_and_uncompress<S: Serialize + for<'a> Deserialize<'a>>(data: &[u8], key: &EncKey) -> Result<S> {
+    fn decrypt_and_uncompress<S: Serialize + for<'a> Deserialize<'a>>(
+        data: &[u8],
+        key: &EncKey,
+    ) -> Result<S> {
         /// Generic function to decrypt and uncompress data encrypted by dedup
         // decode encrypted data to split nonce and encrypted data
         let ctx = bincode::deserialize::<CryptoCtx>(data)?;
@@ -560,12 +548,34 @@ pub mod structs {
         Ok(bincode::deserialize(&uncompressed_data)?)
     }
 
+    fn encrypt_inode_db_entry(entry: &InodeDbEntry) -> Result<Vec<u8>> {
+        encrypt(
+            entry,
+            INODE_DB_KEY
+                .get()
+                .expect("INODE_DB_KEY should be initialized!"),
+        )
+    }
 
+    fn decrypt_inode_db_entry(encrypted_data: &[u8]) -> Result<InodeDbEntry> {
+        decrypt(
+            encrypted_data,
+            INODE_DB_KEY
+                .get()
+                .expect("INODE_DB_KEY should be initialized!"),
+        )
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    struct InodeDbEntry {
+        inode: Inode,
+        ref_count: RefCount,
+    }
 
     #[derive(Debug)]
     struct InodeDb(sled::Tree);
 
-    impl InodeDb{
+    impl InodeDb {
         pub fn self_test(&self) -> Result<()> {
             for data in self.0.iter() {
                 let (key, encrypted_data) = data?;
@@ -574,59 +584,106 @@ pub mod structs {
                     return Err(DedupError::SledKeyLengthError.into());
                 }
                 // Check data
-                let _: Inode = decrypt(&encrypted_data,INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
+                let _ = decrypt_inode_db_entry(&encrypted_data)?;
             }
             Ok(())
         }
 
-        pub fn new(tree: sled::Tree) -> Result<InodeDb>{
-            let db = InodeDb{ 0: tree };
+        pub fn new(tree: sled::Tree) -> Result<InodeDb> {
+            let db = InodeDb(tree);
             db.self_test()?;
             Ok(db)
         }
 
-        pub fn insert(&mut self, inode: Inode) -> Result<(bool, InodeHash)> {
-            let hash: InodeHash = *inode.keyed_hash(INODE_HASH_KEY.get().expect("INODE_HASH_KEY should be initialized!"))?.as_bytes();
-            match self.0.get(&hash)? {
-                Some(_data) => { Ok((true, hash)) }
-                None => {
-                    let encrypted_inode = encrypt(&inode, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
-                    self.0.insert(&hash, &encrypted_inode[..])?;
-                    Ok((false, hash))
-                }
-            }
+        pub fn len(&self) -> usize {
+            self.0.len()
         }
 
-        pub fn remove(&mut self, key: &InodeHash) -> Result<Option<Inode>> {
+        pub fn insert(&mut self, inode: Inode) -> Result<(RefCount, InodeHash)> {
+            let key = inode.db_hash()?;
             match self.0.remove(key)? {
-                None => { Ok(None) }
-                Some(encrypted_data) => {
-                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
-                    Ok(Some(inode))
+                Some(old) => {
+                    let old = decrypt_inode_db_entry(&old)?;
+                    let ref_count = old.ref_count + 1;
+
+                    self.0.insert(
+                        key,
+                        encrypt_inode_db_entry(&InodeDbEntry { inode, ref_count })?,
+                    )?;
+
+                    Ok((ref_count, key))
+                }
+                None => {
+                    let encrypted_entry = encrypt_inode_db_entry(&InodeDbEntry {
+                        inode,
+                        ref_count: 1,
+                    })?;
+                    self.0.insert(key, encrypted_entry)?;
+                    Ok((1, key))
                 }
             }
         }
 
-        pub fn get_inode(&self, key: InodeHash) -> Result<Option<Inode>> {
+        pub fn remove(&mut self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
+            match self.0.remove(key)? {
+                None => Ok(None),
+                Some(old) => {
+                    let old = decrypt_inode_db_entry(&old)?;
+                    if old.ref_count <= 1 {
+                        Ok(Some((0, old.inode)))
+                    } else {
+                        let ref_count = old.ref_count - 1;
+
+                        let encrypted_entry = encrypt_inode_db_entry(&InodeDbEntry {
+                            inode: old.inode.clone(),
+                            ref_count,
+                        })?;
+                        self.0.insert(key, encrypted_entry)?;
+                        Ok(Some((ref_count, old.inode)))
+                    }
+                }
+            }
+        }
+
+        pub fn get_inode_db_entry(&self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
             match self.0.get(key)? {
-                None => { Ok(None) }
+                None => Ok(None),
                 Some(encrypted_data) => {
-                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
-                    Ok(Some(inode))
+                    let entry = decrypt_inode_db_entry(&encrypted_data)?;
+                    Ok(Some((entry.ref_count, entry.inode)))
                 }
             }
         }
 
-        pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, Inode>> {
-            let mut result = BTreeMap::<InodeHash, Inode>::new();
+        pub fn get_inode(&self, key: &InodeHash) -> Result<Option<Inode>> {
+            match self.get_inode_db_entry(key)? {
+                None => Ok(None),
+                Some((_ref_count, inode)) => Ok(Some(inode)),
+            }
+        }
+
+        pub fn get_ref_count(&self, key: &InodeHash) -> Result<Option<RefCount>> {
+            match self.get_inode_db_entry(key)? {
+                None => Ok(None),
+                Some((ref_count, _inode)) => Ok(Some(ref_count)),
+            }
+        }
+
+        pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, (RefCount, Inode)>> {
+            let mut result = BTreeMap::<InodeHash, (RefCount, Inode)>::new();
             for data in self.0.iter() {
                 let (key, encrypted_data) = data?;
                 if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 } else {
-                    let hash: ChunkHash = key.chunks_exact(HASH_SIZE).next().unwrap().try_into().unwrap();
-                    let inode: Inode = decrypt(&encrypted_data, INODE_DB_KEY.get().expect("INODE_DB_KEY should be initialized!"))?;
-                    result.insert(hash, inode);
+                    let hash: InodeHash = key
+                        .chunks_exact(HASH_SIZE)
+                        .next()
+                        .unwrap()
+                        .try_into()
+                        .unwrap();
+                    let entry = decrypt_inode_db_entry(&encrypted_data)?;
+                    result.insert(hash, (entry.ref_count, entry.inode));
                 }
             }
             Ok(result)
@@ -642,10 +699,12 @@ pub mod structs {
         #[test]
         fn test_compressed_encryption_success() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
 
             let now = Instant::now();
@@ -664,10 +723,12 @@ pub mod structs {
         #[test]
         fn test_compressed_encryption_fail_tempering() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
 
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let mut enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
@@ -681,10 +742,12 @@ pub mod structs {
         #[test]
         fn test_compressed_encryption_fail_key() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
 
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
@@ -697,10 +760,12 @@ pub mod structs {
         #[test]
         fn test_encryption_success() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
 
             let now = Instant::now();
@@ -719,10 +784,12 @@ pub mod structs {
         #[test]
         fn test_encryption_fail_tempering() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let mut enc = encrypt(&testdata, &key.into()).unwrap();
             let last = enc.pop().unwrap();
@@ -735,10 +802,12 @@ pub mod structs {
         #[test]
         fn test_encryption_fail_key() {
             let mut data = Vec::<u8>::new();
-            for n in 0..1024*1024 {
-                for i in 0..5 {data.push(i);}
+            for n in 0..1024 * 1024 {
+                for i in 0..5 {
+                    data.push(i);
+                }
             }
-            let testdata = Chunk {data};
+            let testdata = Chunk { data };
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
             let enc = encrypt(&testdata, &key.into()).unwrap();
             key[0] = !key[0];
@@ -777,7 +846,6 @@ pub mod structs {
 
         #[test]
         fn test_ChunkStore() {
-
             let key: EncKey = *blake3::hash(b"foobar").as_bytes();
             CHUNK_STORE_KEY.set(key);
             let config = sled::Config::new().temporary(true);
@@ -789,17 +857,38 @@ pub mod structs {
             let h3 = blake3::hash(b"baz");
             let h4 = blake3::hash(b"foobar");
 
-            assert_eq!(cs.insert(h1.as_bytes()).unwrap(), (1, PathBuf::from("1.bin")));
-            assert_eq!(cs.insert(h2.as_bytes()).unwrap(), (1, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()).unwrap(), (1, PathBuf::from("3.bin")));
+            assert_eq!(
+                cs.insert(h1.as_bytes()).unwrap(),
+                (1, PathBuf::from("1.bin"))
+            );
+            assert_eq!(
+                cs.insert(h2.as_bytes()).unwrap(),
+                (1, PathBuf::from("2.bin"))
+            );
+            assert_eq!(
+                cs.insert(h3.as_bytes()).unwrap(),
+                (1, PathBuf::from("3.bin"))
+            );
 
-            assert_eq!(cs.insert(h2.as_bytes()).unwrap(), (2, PathBuf::from("2.bin")));
-            assert_eq!(cs.insert(h3.as_bytes()).unwrap(), (2, PathBuf::from("3.bin")));
+            assert_eq!(
+                cs.insert(h2.as_bytes()).unwrap(),
+                (2, PathBuf::from("2.bin"))
+            );
+            assert_eq!(
+                cs.insert(h3.as_bytes()).unwrap(),
+                (2, PathBuf::from("3.bin"))
+            );
 
-            assert_eq!(cs.remove(h1.as_bytes()).unwrap(), Some((0, PathBuf::from("1.bin"))));
+            assert_eq!(
+                cs.remove(h1.as_bytes()).unwrap(),
+                Some((0, PathBuf::from("1.bin")))
+            );
             assert_eq!(cs.remove(h1.as_bytes()).unwrap(), None);
 
-            assert_eq!(cs.insert(h4.as_bytes()).unwrap(), (1, PathBuf::from("1.bin")));
+            assert_eq!(
+                cs.insert(h4.as_bytes()).unwrap(),
+                (1, PathBuf::from("1.bin"))
+            );
         }
     }
 }
