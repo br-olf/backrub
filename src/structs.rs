@@ -205,6 +205,7 @@ pub mod structs {
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub enum DedupError {
         SledKeyLengthError,
+        SelfTestError,
     }
 
     impl fmt::Display for DedupError {
@@ -215,6 +216,9 @@ pub mod structs {
                         f,
                         "SledKeyLengthError: a sled key seems to be of wrong length"
                     )
+                }
+                DedupError::SelfTestError => {
+                    write!(f, "SelfTestError: a sled key - value pair is corrupted")
                 }
             }
         }
@@ -229,6 +233,7 @@ pub mod structs {
         SledError(sled::Error),
         BincodeError(bincode::ErrorKind),
         IoError(std::io::Error),
+        TryFromSliceError(std::array::TryFromSliceError),
     }
 
     impl fmt::Display for Error {
@@ -254,11 +259,21 @@ pub mod structs {
                     write!(f, "dedup::Error::IoError: ");
                     error.fmt(f)
                 }
+                Error::TryFromSliceError(error) => {
+                    write!(f, "dedup::Error::TryFromSliceError: ");
+                    error.fmt(f)
+                }
             }
         }
     }
 
     impl error::Error for Error {}
+
+    impl std::convert::From<std::array::TryFromSliceError> for Error {
+        fn from(err: std::array::TryFromSliceError) -> Self {
+            Error::TryFromSliceError(err)
+        }
+    }
 
     impl std::convert::From<Box<bincode::ErrorKind>> for Error {
         fn from(err_ptr: Box<bincode::ErrorKind>) -> Self {
@@ -315,6 +330,14 @@ pub mod structs {
                 if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 }
+                let _: ChunkHash = key
+                    .chunks_exact(HASH_SIZE)
+                    .next()
+                    .map_or_else(
+                        || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                        Ok,
+                    )?
+                    .try_into()?;
                 // Check data
                 let _ = decrypt_chunk_file(&encrypted_data)?;
             }
@@ -417,9 +440,11 @@ pub mod structs {
                     let key: ChunkHash = key
                         .chunks_exact(HASH_SIZE)
                         .next()
-                        .unwrap()
-                        .try_into()
-                        .unwrap();
+                        .map_or_else(
+                            || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                            Ok,
+                        )?
+                        .try_into()?;
                     let chunk_file = decrypt_chunk_file(&encrypted_data)?;
                     result.insert(key, (chunk_file.ref_count, chunk_file.file_name));
                 }
@@ -580,11 +605,24 @@ pub mod structs {
             for data in self.0.iter() {
                 let (key, encrypted_data) = data?;
 
+                // Check Key
                 if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
                 }
+                let key: InodeHash = key
+                    .chunks_exact(HASH_SIZE)
+                    .next()
+                    .map_or_else(
+                        || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                        Ok,
+                    )?
+                    .try_into()?;
+
                 // Check data
-                let _ = decrypt_inode_db_entry(&encrypted_data)?;
+                let entry = decrypt_inode_db_entry(&encrypted_data)?;
+                if key != entry.inode.db_hash()? {
+                    return Err(DedupError::SelfTestError.into());
+                }
             }
             Ok(())
         }
@@ -679,9 +717,11 @@ pub mod structs {
                     let hash: InodeHash = key
                         .chunks_exact(HASH_SIZE)
                         .next()
-                        .unwrap()
-                        .try_into()
-                        .unwrap();
+                        .map_or_else(
+                            || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                            Ok,
+                        )?
+                        .try_into()?;
                     let entry = decrypt_inode_db_entry(&encrypted_data)?;
                     result.insert(hash, (entry.ref_count, entry.inode));
                 }
