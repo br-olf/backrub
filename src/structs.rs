@@ -18,16 +18,35 @@ pub mod structs {
     //type BackupHash = [u8; HASH_SIZE];
     type EncNonce = [u8; NONCE_SIZE];
     type EncKey = [u8; KEY_SIZE];
-    type HashKey = [u8; KEY_SIZE];
     type SigKey = [u8; KEY_SIZE];
 
-    pub static CHUNK_STORE_KEY: OnceCell<EncKey> = OnceCell::new();
-    pub static CHUNK_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
-    pub static INODE_DB_KEY: OnceCell<EncKey> = OnceCell::new();
-    pub static INODE_HASH_KEY: OnceCell<HashKey> = OnceCell::new();
+    static CHUNK_ENC_KEY: OnceCell<EncKey> = OnceCell::new();
+    static CHUNK_HASH_KEY: OnceCell<EncKey> = OnceCell::new();
+    static INODE_ENC_KEY: OnceCell<EncKey> = OnceCell::new();
+    static INODE_HASH_KEY: OnceCell<EncKey> = OnceCell::new();
+
+
+    pub fn initialize_crypto(config: RuntimeConf) -> Result<()>{
+        CHUNK_ENC_KEY.set(config.chunk_encryption_key).map_err(|_| Error::OnceCellError("CHUNK_ENC_KEY is already initialized".to_string()))?;
+        CHUNK_HASH_KEY.set(config.chunk_hash_key).map_err(|_| Error::OnceCellError("CHUNK_HASH_KEY is already initialized".to_string()))?;
+        INODE_ENC_KEY.set(config.inode_encryption_key).map_err(|_| Error::OnceCellError("INODE_ENC_KEY is already initialized".to_string()))?;
+        INODE_HASH_KEY.set(config.inode_hash_key).map_err(|_| Error::OnceCellError("INODE_HASH_KEY. is already initialized".to_string()))?;
+        Ok(())
+    }
+
+     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct RuntimeConf {
+        manifest_sig_key: SigKey,
+        chunk_encryption_key: EncKey,
+        chunk_hash_key: EncKey,
+        inode_encryption_key: EncKey,
+        inode_hash_key: EncKey,
+        backup_encryption_key: EncKey,
+    }
+
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct Metadata {
+    pub struct Metadata {
         mode: u32,
         uid: u32,
         gid: u32,
@@ -38,14 +57,14 @@ pub mod structs {
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct ChunkerConf {
+    pub struct ChunkerConf {
         minimum_chunk_size: usize,
         average_chunk_size: usize,
         maximum_chunk_size: usize,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct Manifest {
+    pub struct Manifest {
         salt: [u8; 32],
         chunk_root_dir: PathBuf,
         backup_db_path: PathBuf,
@@ -55,47 +74,35 @@ pub mod structs {
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct RuntimeConf {
-        manifest_sig_key: SigKey,
-        chunk_encryption_key: EncKey,
-        chunk_hash_key: HashKey,
-        inode_encryption_key: EncKey,
-        inode_hash_key: HashKey,
-        backup_encryption_key: EncKey,
-    }
-
-    type EncBackups = BTreeMap<EncNonce, Vec<u8>>;
-
-    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct Backup {
+    pub struct Backup {
         timestamp: String,
         name: String,
         root: InodeHash,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct Symlink {
+    pub struct Symlink {
         relpath: PathBuf,
         target: PathBuf,
         metadata: Metadata,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct Directory {
+    pub struct Directory {
         relpath: PathBuf,
         metadata: Metadata,
         contents: Vec<InodeHash>,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    struct File {
+    pub struct File {
         relpath: PathBuf,
         chunk_ids: Vec<ChunkHash>,
         metadata: Metadata,
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    enum Inode {
+    pub enum Inode {
         File(File),
         Directory(Directory),
         Symlink(Symlink),
@@ -104,7 +111,7 @@ pub mod structs {
     impl Hashable for Inode {}
 
     impl Inode {
-        fn db_hash(&self) -> Result<InodeHash> {
+        pub fn db_hash(&self) -> Result<InodeHash> {
             Ok(*self
                 .keyed_hash(
                     INODE_HASH_KEY
@@ -121,7 +128,7 @@ pub mod structs {
             Ok(blake3::hash(&serialized))
         }
 
-        fn keyed_hash(&self, key: &HashKey) -> Result<blake3::Hash> {
+        fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
             let serialized = bincode::serialize(self)?;
             Ok(blake3::keyed_hash(key, &serialized))
         }
@@ -234,6 +241,7 @@ pub mod structs {
         BincodeError(bincode::ErrorKind),
         IoError(std::io::Error),
         TryFromSliceError(std::array::TryFromSliceError),
+        OnceCellError(String),
     }
 
     impl fmt::Display for Error {
@@ -263,6 +271,9 @@ pub mod structs {
                     write!(f, "dedup::Error::TryFromSliceError: ");
                     error.fmt(f)
                 }
+                Error::OnceCellError(msg) => {
+                    write!(f, "dedup::Error::OnceCellError: {}", msg)
+                }
             }
         }
     }
@@ -275,6 +286,11 @@ pub mod structs {
         }
     }
 
+    impl std::convert::From<String> for Error {
+        fn from(err: String ) -> Self {
+            Error::OnceCellError(err)
+        }
+    }
     impl std::convert::From<Box<bincode::ErrorKind>> for Error {
         fn from(err_ptr: Box<bincode::ErrorKind>) -> Self {
             Error::BincodeError(*err_ptr)
@@ -480,18 +496,18 @@ pub mod structs {
     fn encrypt_chunk_file(chunk_file: &ChunkStoreEntry) -> Result<Vec<u8>> {
         encrypt(
             chunk_file,
-            CHUNK_STORE_KEY
+            CHUNK_ENC_KEY
                 .get()
-                .expect("CHUNK_STORE_KEY should be initialized!"),
+                .expect("CHUNK_ENC_KEY should be initialized!"),
         )
     }
 
     fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkStoreEntry> {
         decrypt(
             encrypted_data,
-            CHUNK_STORE_KEY
+            CHUNK_ENC_KEY
                 .get()
-                .expect("CHUNK_STORE_KEY should be initialized!"),
+                .expect("CHUNK_ENC_KEY should be initialized!"),
         )
     }
 
@@ -576,18 +592,18 @@ pub mod structs {
     fn encrypt_inode_db_entry(entry: &InodeDbEntry) -> Result<Vec<u8>> {
         encrypt(
             entry,
-            INODE_DB_KEY
+            INODE_ENC_KEY
                 .get()
-                .expect("INODE_DB_KEY should be initialized!"),
+                .expect("INODE_ENC_KEY should be initialized!"),
         )
     }
 
     fn decrypt_inode_db_entry(encrypted_data: &[u8]) -> Result<InodeDbEntry> {
         decrypt(
             encrypted_data,
-            INODE_DB_KEY
+            INODE_ENC_KEY
                 .get()
-                .expect("INODE_DB_KEY should be initialized!"),
+                .expect("INODE_ENC_KEY should be initialized!"),
         )
     }
 
@@ -887,7 +903,7 @@ pub mod structs {
         #[test]
         fn test_ChunkStore() {
             let key: EncKey = *blake3::hash(b"foobar").as_bytes();
-            CHUNK_STORE_KEY.set(key);
+            CHUNK_ENC_KEY.set(key);
             let config = sled::Config::new().temporary(true);
             let db = config.open().unwrap();
 
