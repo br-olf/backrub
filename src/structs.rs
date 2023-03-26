@@ -5,7 +5,8 @@ pub mod structs {
     use serde::{Deserialize, Serialize};
     use std::collections::{BTreeMap, HashMap};
     use std::io::prelude::*;
-    use std::path::PathBuf;
+    use std::path::{PathBuf, Path};
+    use std::sync::{Mutex, Arc};
 
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
@@ -25,8 +26,42 @@ pub mod structs {
     static INODE_ENC_KEY: OnceCell<EncKey> = OnceCell::new();
     static INODE_HASH_KEY: OnceCell<EncKey> = OnceCell::new();
 
+    static BACKUP_MANAGER: OnceCell<BackupManager> = OnceCell::new();
 
-    pub fn initialize_crypto(config: RuntimeConf) -> Result<()>{
+    pub struct BackupManager {
+        inode_db: Arc<Mutex<InodeDb>>,
+        chunk_db: Arc<Mutex<ChunkDb>>,
+        manifest: Manifest,
+    }
+
+
+        pub fn initialize_backup_manager(manifest_path: &Path, password: &str) -> Result<&'static BackupManager> {
+            if BACKUP_MANAGER.get().is_some() {
+                return Err(Error::OnceCellError("BACKUP_MANAGER is already initialized".to_string()));
+            }
+
+            let manager: BackupManager = todo!();
+
+
+            BACKUP_MANAGER.set(manager).map_err(|_| Error::OnceCellError("BACKUP_MANAGER is already initialized".to_string()))?;
+            Ok(BACKUP_MANAGER.get().unwrap())
+        }
+
+        pub fn get_backup_manager() -> Option<&'static BackupManager> {
+            BACKUP_MANAGER.get()
+        }
+
+    impl BackupManager {
+        fn create_backup(name: &str, path: &Path) -> Result<()> {
+            todo!()
+        }
+
+        async fn bla() -> () {
+            todo!()
+        }
+    }
+
+    fn initialize_crypto(config: RuntimeConf) -> Result<()>{
         CHUNK_ENC_KEY.set(config.chunk_encryption_key).map_err(|_| Error::OnceCellError("CHUNK_ENC_KEY is already initialized".to_string()))?;
         CHUNK_HASH_KEY.set(config.chunk_hash_key).map_err(|_| Error::OnceCellError("CHUNK_HASH_KEY is already initialized".to_string()))?;
         INODE_ENC_KEY.set(config.inode_encryption_key).map_err(|_| Error::OnceCellError("INODE_ENC_KEY is already initialized".to_string()))?;
@@ -196,7 +231,7 @@ pub mod structs {
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct ChunkStoreEntry {
+    pub struct ChunkDbEntry {
         ref_count: RefCount,
         file_name: PathBuf,
     }
@@ -329,15 +364,15 @@ pub mod structs {
     };
 
     #[derive(Debug)]
-    struct ChunkStore {
+    struct ChunkDb {
         path_gen: FilePathGen,
         unused_paths: Vec<PathBuf>,
         chunk_map: sled::Tree,
     }
 
-    impl ChunkStore {
+    impl ChunkDb {
         pub fn self_test(&self) -> Result<()> {
-            /// Check the ChunkStore contents for errors
+            /// Check the ChunkDb contents for errors
             ///
             /// This is a O(n) operation
             for data in self.chunk_map.iter() {
@@ -360,8 +395,8 @@ pub mod structs {
             Ok(())
         }
 
-        pub fn new(tree: sled::Tree) -> Result<ChunkStore> {
-            let cs = ChunkStore {
+        pub fn new(tree: sled::Tree) -> Result<ChunkDb> {
+            let cs = ChunkDb {
                 path_gen: FilePathGen::default(),
                 unused_paths: Vec::<PathBuf>::default(),
                 chunk_map: tree,
@@ -382,7 +417,7 @@ pub mod structs {
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(&ChunkStoreEntry {
+                        encrypt_chunk_file(&ChunkDbEntry {
                             file_name: file_name.clone(),
                             ref_count: 1,
                         })?,
@@ -397,7 +432,7 @@ pub mod structs {
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(&ChunkStoreEntry {
+                        encrypt_chunk_file(&ChunkDbEntry {
                             file_name: old.file_name.clone(),
                             ref_count,
                         })?,
@@ -425,7 +460,7 @@ pub mod structs {
                         let ref_count = old.ref_count - 1;
                         self.chunk_map.insert(
                             key,
-                            encrypt_chunk_file(&ChunkStoreEntry {
+                            encrypt_chunk_file(&ChunkDbEntry {
                                 file_name: old.file_name.clone(),
                                 ref_count,
                             })?,
@@ -493,7 +528,7 @@ pub mod structs {
         }
     }
 
-    fn encrypt_chunk_file(chunk_file: &ChunkStoreEntry) -> Result<Vec<u8>> {
+    fn encrypt_chunk_file(chunk_file: &ChunkDbEntry) -> Result<Vec<u8>> {
         encrypt(
             chunk_file,
             CHUNK_ENC_KEY
@@ -502,7 +537,7 @@ pub mod structs {
         )
     }
 
-    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkStoreEntry> {
+    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkDbEntry> {
         decrypt(
             encrypted_data,
             CHUNK_ENC_KEY
@@ -901,13 +936,13 @@ pub mod structs {
         }
 
         #[test]
-        fn test_ChunkStore() {
+        fn test_ChunkDb() {
             let key: EncKey = *blake3::hash(b"foobar").as_bytes();
             CHUNK_ENC_KEY.set(key);
             let config = sled::Config::new().temporary(true);
             let db = config.open().unwrap();
 
-            let mut cs = ChunkStore::new(db.open_tree(b"test").unwrap()).unwrap();
+            let mut cs = ChunkDb::new(db.open_tree(b"test").unwrap()).unwrap();
             let h1 = blake3::hash(b"foo");
             let h2 = blake3::hash(b"bar");
             let h3 = blake3::hash(b"baz");
