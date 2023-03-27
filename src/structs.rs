@@ -6,7 +6,7 @@ pub mod structs {
     use std::collections::{BTreeMap, HashMap};
     use std::io::prelude::*;
     use std::path::{PathBuf, Path};
-    use std::sync::{Mutex, Arc};
+    use async_std::sync::Mutex;
 
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
@@ -21,55 +21,34 @@ pub mod structs {
     type EncKey = [u8; KEY_SIZE];
     type SigKey = [u8; KEY_SIZE];
 
-    static CHUNK_ENC_KEY: OnceCell<EncKey> = OnceCell::new();
-    static CHUNK_HASH_KEY: OnceCell<EncKey> = OnceCell::new();
-    static INODE_ENC_KEY: OnceCell<EncKey> = OnceCell::new();
-    static INODE_HASH_KEY: OnceCell<EncKey> = OnceCell::new();
 
-    static BACKUP_MANAGER: OnceCell<BackupManager> = OnceCell::new();
-
+    #[derive(Debug)]
     pub struct BackupManager {
-        inode_db: Arc<Mutex<InodeDb>>,
-        chunk_db: Arc<Mutex<ChunkDb>>,
+        inode_db: Mutex<InodeDb>,
+        chunk_db: Mutex<ChunkDb>,
         manifest: Manifest,
     }
 
 
-        pub fn initialize_backup_manager(manifest_path: &Path, password: &str) -> Result<&'static BackupManager> {
-            if BACKUP_MANAGER.get().is_some() {
-                return Err(Error::OnceCellError("BACKUP_MANAGER is already initialized".to_string()));
-            }
+    impl BackupManager {
+        pub fn initialize_backup_manager(manifest_path: &Path, password: &str) -> Result<BackupManager> {
 
             let manager: BackupManager = todo!();
 
 
-            BACKUP_MANAGER.set(manager).map_err(|_| Error::OnceCellError("BACKUP_MANAGER is already initialized".to_string()))?;
-            Ok(BACKUP_MANAGER.get().unwrap())
+            Ok(manager)
         }
 
-        pub fn get_backup_manager() -> Option<&'static BackupManager> {
-            BACKUP_MANAGER.get()
-        }
-
-    impl BackupManager {
         fn create_backup(name: &str, path: &Path) -> Result<()> {
             todo!()
         }
 
-        async fn bla() -> () {
+        async fn bla(&mut self) -> () {
             todo!()
         }
     }
 
-    fn initialize_crypto(config: RuntimeConf) -> Result<()>{
-        CHUNK_ENC_KEY.set(config.chunk_encryption_key).map_err(|_| Error::OnceCellError("CHUNK_ENC_KEY is already initialized".to_string()))?;
-        CHUNK_HASH_KEY.set(config.chunk_hash_key).map_err(|_| Error::OnceCellError("CHUNK_HASH_KEY is already initialized".to_string()))?;
-        INODE_ENC_KEY.set(config.inode_encryption_key).map_err(|_| Error::OnceCellError("INODE_ENC_KEY is already initialized".to_string()))?;
-        INODE_HASH_KEY.set(config.inode_hash_key).map_err(|_| Error::OnceCellError("INODE_HASH_KEY. is already initialized".to_string()))?;
-        Ok(())
-    }
-
-     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct RuntimeConf {
         manifest_sig_key: SigKey,
         chunk_encryption_key: EncKey,
@@ -145,18 +124,6 @@ pub mod structs {
 
     impl Hashable for Inode {}
 
-    impl Inode {
-        pub fn db_hash(&self) -> Result<InodeHash> {
-            Ok(*self
-                .keyed_hash(
-                    INODE_HASH_KEY
-                        .get()
-                        .expect("INODE_HASH_KEY should be initialized!"),
-                )?
-                .as_bytes())
-        }
-    }
-
     trait Hashable: Serialize {
         fn hash(&self) -> Result<blake3::Hash> {
             let serialized = bincode::serialize(self)?;
@@ -228,12 +195,6 @@ pub mod structs {
                 None
             }
         }
-    }
-
-    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct ChunkDbEntry {
-        ref_count: RefCount,
-        file_name: PathBuf,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -363,11 +324,23 @@ pub mod structs {
         Nonce, XChaCha20Poly1305,
     };
 
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct ChunkDbState {
+        pub unused_paths: Vec<PathBuf>,
+        pub path_gen: FilePathGen,
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    struct ChunkDbEntry {
+        ref_count: RefCount,
+        file_name: PathBuf,
+    }
+
     #[derive(Debug)]
     struct ChunkDb {
-        path_gen: FilePathGen,
-        unused_paths: Vec<PathBuf>,
         chunk_map: sled::Tree,
+        state: ChunkDbState,
+        chunk_enc_key: EncKey,
     }
 
     impl ChunkDb {
@@ -390,16 +363,19 @@ pub mod structs {
                     )?
                     .try_into()?;
                 // Check data
-                let _ = decrypt_chunk_file(&encrypted_data)?;
+                let _: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
             }
             Ok(())
         }
 
-        pub fn new(tree: sled::Tree) -> Result<ChunkDb> {
+        pub fn new(tree: sled::Tree, chunk_enc_key: EncKey) -> Result<ChunkDb> {
             let cs = ChunkDb {
-                path_gen: FilePathGen::default(),
-                unused_paths: Vec::<PathBuf>::default(),
+                state: ChunkDbState{
+                    path_gen: FilePathGen::default(),
+                    unused_paths: Vec::<PathBuf>::default()
+                },
                 chunk_map: tree,
+                chunk_enc_key: chunk_enc_key,
             };
             cs.self_test()?;
             Ok(cs)
@@ -408,34 +384,34 @@ pub mod structs {
         pub fn insert(&mut self, key: &ChunkHash) -> Result<(RefCount, PathBuf)> {
             match self.chunk_map.remove(key)? {
                 None => {
-                    let file_name = self.unused_paths
+                    let file_name = self.state.unused_paths
                                          .pop()
                                          .unwrap_or_else(||{
-                                             PathBuf::from(self.path_gen.next()
+                                             PathBuf::from(self.state.path_gen.next()
                                                            .expect("BUG: Please contact me if you need more than 10^19 chunks, I'd really like to know the system you are on"))
                     });
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(&ChunkDbEntry {
+                        encrypt(&ChunkDbEntry {
                             file_name: file_name.clone(),
                             ref_count: 1,
-                        })?,
+                        }, &self.chunk_enc_key)?,
                     )?;
 
                     Ok((1, file_name))
                 }
                 Some(old) => {
-                    let old = decrypt_chunk_file(&old)?;
+                    let old: ChunkDbEntry = decrypt(&old, &self.chunk_enc_key)?;
 
                     let ref_count = old.ref_count + 1;
 
                     self.chunk_map.insert(
                         key,
-                        encrypt_chunk_file(&ChunkDbEntry {
+                        encrypt(&ChunkDbEntry {
                             file_name: old.file_name.clone(),
                             ref_count,
-                        })?,
+                        }, &self.chunk_enc_key)?,
                     )?;
 
                     Ok((ref_count, old.file_name))
@@ -451,19 +427,19 @@ pub mod structs {
             match self.chunk_map.remove(key)? {
                 None => Ok(None),
                 Some(old) => {
-                    let old = decrypt_chunk_file(&old)?;
+                    let old: ChunkDbEntry = decrypt(&old, &self.chunk_enc_key)?;
                     if old.ref_count <= 1 {
                         // save old file name for reuse
-                        self.unused_paths.push(old.file_name.clone());
+                        self.state.unused_paths.push(old.file_name.clone());
                         Ok(Some((0, old.file_name)))
                     } else {
                         let ref_count = old.ref_count - 1;
                         self.chunk_map.insert(
                             key,
-                            encrypt_chunk_file(&ChunkDbEntry {
+                            encrypt(&ChunkDbEntry {
                                 file_name: old.file_name.clone(),
                                 ref_count,
-                            })?,
+                            }, &self.chunk_enc_key)?,
                         )?;
                         Ok(Some((ref_count, old.file_name)))
                     }
@@ -496,7 +472,7 @@ pub mod structs {
                             Ok,
                         )?
                         .try_into()?;
-                    let chunk_file = decrypt_chunk_file(&encrypted_data)?;
+                    let chunk_file: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
                     result.insert(key, (chunk_file.ref_count, chunk_file.file_name));
                 }
             }
@@ -507,7 +483,7 @@ pub mod structs {
             match self.chunk_map.get(key)? {
                 None => Ok(None),
                 Some(encrypted_data) => {
-                    let chunk_file = decrypt_chunk_file(&encrypted_data)?;
+                    let chunk_file: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
                     Ok(Some((chunk_file.ref_count, chunk_file.file_name)))
                 }
             }
@@ -528,23 +504,6 @@ pub mod structs {
         }
     }
 
-    fn encrypt_chunk_file(chunk_file: &ChunkDbEntry) -> Result<Vec<u8>> {
-        encrypt(
-            chunk_file,
-            CHUNK_ENC_KEY
-                .get()
-                .expect("CHUNK_ENC_KEY should be initialized!"),
-        )
-    }
-
-    fn decrypt_chunk_file(encrypted_data: &[u8]) -> Result<ChunkDbEntry> {
-        decrypt(
-            encrypted_data,
-            CHUNK_ENC_KEY
-                .get()
-                .expect("CHUNK_ENC_KEY should be initialized!"),
-        )
-    }
 
     fn encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
         /// Generic function to encrypt data in dedup
@@ -624,36 +583,23 @@ pub mod structs {
         Ok(bincode::deserialize(&uncompressed_data)?)
     }
 
-    fn encrypt_inode_db_entry(entry: &InodeDbEntry) -> Result<Vec<u8>> {
-        encrypt(
-            entry,
-            INODE_ENC_KEY
-                .get()
-                .expect("INODE_ENC_KEY should be initialized!"),
-        )
-    }
-
-    fn decrypt_inode_db_entry(encrypted_data: &[u8]) -> Result<InodeDbEntry> {
-        decrypt(
-            encrypted_data,
-            INODE_ENC_KEY
-                .get()
-                .expect("INODE_ENC_KEY should be initialized!"),
-        )
-    }
-
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct InodeDbEntry {
         inode: Inode,
         ref_count: RefCount,
     }
 
+
     #[derive(Debug)]
-    struct InodeDb(sled::Tree);
+    struct InodeDb {
+        tree: sled::Tree,
+        inode_enc_key: EncKey,
+        inode_hash_key: EncKey,
+    }
 
     impl InodeDb {
         pub fn self_test(&self) -> Result<()> {
-            for data in self.0.iter() {
+            for data in self.tree.iter() {
                 let (key, encrypted_data) = data?;
 
                 // Check Key
@@ -670,64 +616,64 @@ pub mod structs {
                     .try_into()?;
 
                 // Check data
-                let entry = decrypt_inode_db_entry(&encrypted_data)?;
-                if key != entry.inode.db_hash()? {
+                let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
+                if key != *entry.inode.keyed_hash(&self.inode_hash_key)?.as_bytes() {
                     return Err(DedupError::SelfTestError.into());
                 }
             }
             Ok(())
         }
 
-        pub fn new(tree: sled::Tree) -> Result<InodeDb> {
-            let db = InodeDb(tree);
+        pub fn new(tree: sled::Tree, inode_enc_key: EncKey, inode_hash_key: EncKey) -> Result<InodeDb> {
+            let db = InodeDb{tree, inode_enc_key, inode_hash_key};
             db.self_test()?;
             Ok(db)
         }
 
         pub fn len(&self) -> usize {
-            self.0.len()
+            self.tree.len()
         }
 
         pub fn insert(&mut self, inode: Inode) -> Result<(RefCount, InodeHash)> {
-            let key = inode.db_hash()?;
-            match self.0.remove(key)? {
+            let key: InodeHash = *inode.keyed_hash(&self.inode_hash_key)?.as_bytes();
+            match self.tree.remove(key)? {
                 Some(old) => {
-                    let old = decrypt_inode_db_entry(&old)?;
+                    let old: InodeDbEntry = decrypt(&old, &self.inode_enc_key)?;
                     let ref_count = old.ref_count + 1;
 
-                    self.0.insert(
+                    self.tree.insert(
                         key,
-                        encrypt_inode_db_entry(&InodeDbEntry { inode, ref_count })?,
+                        encrypt(&InodeDbEntry { inode, ref_count }, &self.inode_enc_key)?,
                     )?;
 
                     Ok((ref_count, key))
                 }
                 None => {
-                    let encrypted_entry = encrypt_inode_db_entry(&InodeDbEntry {
+                    let encrypted_entry = encrypt(&InodeDbEntry {
                         inode,
                         ref_count: 1,
-                    })?;
-                    self.0.insert(key, encrypted_entry)?;
+                    }, &self.inode_enc_key)?;
+                    self.tree.insert(key, encrypted_entry)?;
                     Ok((1, key))
                 }
             }
         }
 
         pub fn remove(&mut self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
-            match self.0.remove(key)? {
+            match self.tree.remove(key)? {
                 None => Ok(None),
                 Some(old) => {
-                    let old = decrypt_inode_db_entry(&old)?;
+                    let old: InodeDbEntry = decrypt(&old, &self.inode_enc_key)?;
                     if old.ref_count <= 1 {
                         Ok(Some((0, old.inode)))
                     } else {
                         let ref_count = old.ref_count - 1;
 
-                        let encrypted_entry = encrypt_inode_db_entry(&InodeDbEntry {
+                        let encrypted_entry = encrypt(&InodeDbEntry {
                             inode: old.inode.clone(),
                             ref_count,
-                        })?;
-                        self.0.insert(key, encrypted_entry)?;
+                        }, &self.inode_enc_key)?;
+                        self.tree.insert(key, encrypted_entry)?;
                         Ok(Some((ref_count, old.inode)))
                     }
                 }
@@ -735,10 +681,10 @@ pub mod structs {
         }
 
         pub fn get_inode_db_entry(&self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
-            match self.0.get(key)? {
+            match self.tree.get(key)? {
                 None => Ok(None),
                 Some(encrypted_data) => {
-                    let entry = decrypt_inode_db_entry(&encrypted_data)?;
+                    let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
                     Ok(Some((entry.ref_count, entry.inode)))
                 }
             }
@@ -760,7 +706,7 @@ pub mod structs {
 
         pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, (RefCount, Inode)>> {
             let mut result = BTreeMap::<InodeHash, (RefCount, Inode)>::new();
-            for data in self.0.iter() {
+            for data in self.tree.iter() {
                 let (key, encrypted_data) = data?;
                 if key.len() != HASH_SIZE {
                     return Err(DedupError::SledKeyLengthError.into());
@@ -773,7 +719,7 @@ pub mod structs {
                             Ok,
                         )?
                         .try_into()?;
-                    let entry = decrypt_inode_db_entry(&encrypted_data)?;
+                    let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
                     result.insert(hash, (entry.ref_count, entry.inode));
                 }
             }
@@ -938,11 +884,10 @@ pub mod structs {
         #[test]
         fn test_ChunkDb() {
             let key: EncKey = *blake3::hash(b"foobar").as_bytes();
-            CHUNK_ENC_KEY.set(key);
             let config = sled::Config::new().temporary(true);
             let db = config.open().unwrap();
 
-            let mut cs = ChunkDb::new(db.open_tree(b"test").unwrap()).unwrap();
+            let mut cs = ChunkDb::new(db.open_tree(b"test").unwrap(), key).unwrap();
             let h1 = blake3::hash(b"foo");
             let h2 = blake3::hash(b"bar");
             let h3 = blake3::hash(b"baz");

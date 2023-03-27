@@ -40,6 +40,7 @@ rust-argon2 = "1.0.0"
 num = "0.4.0"
 lazy-init = "0.5.1"
 once_cell = "1.17.1"
+async-std = "1.12.0"
 
 [profile.release]
 opt-level = 3  # Optimize for speed.
