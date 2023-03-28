@@ -33,7 +33,8 @@ pub mod structs {
             Ok(blake3::keyed_hash(&key.as_array(), &serialized))
         }
     }
-    trait Encrypt: Serialize + for<'a> Deserialize<'a> {
+
+    pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
         /// Generic function to encrypt data in dedup
         fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
             // generate nonce
