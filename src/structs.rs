@@ -22,6 +22,91 @@ pub mod structs {
 
     type RefCount = usize;
 
+    trait Hashable: Serialize {
+        fn hash(&self) -> Result<blake3::Hash> {
+            let serialized = bincode::serialize(self)?;
+            Ok(blake3::hash(&serialized))
+        }
+
+        fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
+            let serialized = bincode::serialize(self)?;
+            Ok(blake3::keyed_hash(&key.as_array(), &serialized))
+        }
+    }
+    trait Encrypt: Serialize + for<'a> Deserialize<'a> {
+        /// Generic function to encrypt data in dedup
+        fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
+            // generate nonce
+            let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+            // setup the cipher
+            let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+            // convert data to Vec<u8>
+            let serialized_data = bincode::serialize(self)?;
+            // encrypt the data
+            let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &serialized_data[..])?;
+            // construct CryptoCtx using the nonce and the encrypted data
+            let ctx = CryptoCtx {
+                nonce,
+                data: encrypted_data,
+            };
+            // convert CryptoCtx to Vec<u8>
+            Ok(bincode::serialize(&ctx)?)
+        }
+
+        /// Generic function to decrypt data encrypted by dedup
+        fn decrypt(data: &[u8], key: &EncKey) -> Result<Self> {
+            // decode encrypted data to split nonce and encrypted data
+            let ctx = bincode::deserialize::<CryptoCtx>(data)?;
+            // setup the cipher
+            let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+            // decrypt the data
+            let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
+            // convert decrypted data to the target data type
+            Ok(bincode::deserialize(&decrypted_data)?)
+        }
+
+        /// Generic function to compress and encrypt data in dedup
+        fn compress_and_encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
+            // generate nonce
+            let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
+            // setup the cipher
+            let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+            // convert data to Vec<u8>
+            let serialized_data = bincode::serialize(self)?;
+
+            // compress the data
+            let mut compressor = DeflateEncoder::new(Vec::new(), Compression::default());
+            compressor.write_all(&serialized_data[..])?;
+            let compressed_data = compressor.finish()?;
+            // encrypt the data
+            let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &compressed_data[..])?;
+            // construct CryptoCtx using the nonce and the encrypted data
+            let ctx = CryptoCtx {
+                nonce,
+                data: encrypted_data,
+            };
+            // convert CryptoCtx to Vec<u8>
+            Ok(bincode::serialize(&ctx)?)
+        }
+
+        /// Generic function to decrypt and uncompress data encrypted by dedup
+        fn decrypt_and_uncompress(data: &[u8], key: &EncKey) -> Result<Self> {
+            // decode encrypted data to split nonce and encrypted data
+            let ctx = bincode::deserialize::<CryptoCtx>(data)?;
+            // setup the cipher
+            let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+            // decrypt the data
+            let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
+            // decompress decrypted data
+            let mut uncompressed_data = Vec::new();
+            let mut deflater = DeflateDecoder::new(uncompressed_data);
+            deflater.write_all(&decrypted_data)?;
+            uncompressed_data = deflater.finish()?;
+            // deserialize uncompressed data
+            Ok(bincode::deserialize(&uncompressed_data)?)
+        }
+    }
+
     #[derive(
         Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
     )]
@@ -175,9 +260,56 @@ pub mod structs {
         }
     }
 
+    #[derive(
+        Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
+    )]
+    pub struct SigKey([u8; KEY_SIZE]);
+
+    impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
+        for SigKey
+    {
+        fn from(
+            array: GenericArray<
+                u8,
+                UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>,
+            >,
+        ) -> Self {
+            SigKey(<[u8; KEY_SIZE]>::from(array))
+        }
+    }
+
+    impl SigKey {
+        pub fn as_array(&self) -> [u8; KEY_SIZE] {
+            self.0
+        }
+    }
+
+    impl From<[u8; KEY_SIZE]> for SigKey {
+        fn from(array: [u8; KEY_SIZE]) -> Self {
+            SigKey(array)
+        }
+    }
+
+    impl TryFrom<&[u8]> for SigKey {
+        type Error = std::array::TryFromSliceError;
+        fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
+            Ok(SigKey(<[u8; KEY_SIZE]>::try_from(array)?))
+        }
+    }
+
+    impl AsMut<[u8]> for SigKey {
+        fn as_mut(&mut self) -> &mut [u8] {
+            self.0.as_mut()
+        }
+    }
+
+    impl AsRef<[u8]> for SigKey {
+        fn as_ref(&self) -> &[u8] {
+            self.0.as_ref()
+        }
+    }
+
     //type BackupHash = [u8; HASH_SIZE];
-    //type EncNonce = [u8; NONCE_SIZE];
-    type SigKey = [u8; KEY_SIZE];
 
     #[derive(Debug)]
     pub struct BackupManager {
@@ -205,6 +337,7 @@ pub mod structs {
         }
     }
 
+    /*
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct RuntimeConf {
         manifest_sig_key: SigKey,
@@ -214,7 +347,7 @@ pub mod structs {
         inode_hash_key: EncKey,
         backup_encryption_key: EncKey,
     }
-
+    */
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Metadata {
         mode: u32,
@@ -280,23 +413,12 @@ pub mod structs {
 
     impl Hashable for Inode {}
 
-    trait Hashable: Serialize {
-        fn hash(&self) -> Result<blake3::Hash> {
-            let serialized = bincode::serialize(self)?;
-            Ok(blake3::hash(&serialized))
-        }
-
-        fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
-            let serialized = bincode::serialize(self)?;
-            Ok(blake3::keyed_hash(&key.as_array(), &serialized))
-        }
-    }
-
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct Chunk {
         data: Vec<u8>,
     }
 
+    impl Encrypt for Chunk {}
     impl Hashable for Chunk {}
 
     pub fn log2u64(x: u64) -> Option<u64> {
@@ -494,6 +616,8 @@ pub mod structs {
         file_name: PathBuf,
     }
 
+    impl Encrypt for ChunkDbEntry {}
+
     /// ChunkDb manages mappings from chunk hashes to file names
     ///
     /// The backuped chunks are supposed to be encrypted and stored under the filenames provided by this
@@ -524,7 +648,7 @@ pub mod structs {
                     )?
                     .try_into()?;
                 // Check data
-                let _: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
+                let _ = ChunkDbEntry::decrypt(&encrypted_data, &self.chunk_enc_key)?;
             }
             Ok(())
         }
@@ -577,31 +701,27 @@ pub mod structs {
 
                     self.chunk_map.insert(
                         key,
-                        encrypt(
-                            &ChunkDbEntry {
-                                file_name: file_name.clone(),
-                                ref_count: 1,
-                            },
-                            &self.chunk_enc_key,
-                        )?,
+                        ChunkDbEntry {
+                            file_name: file_name.clone(),
+                            ref_count: 1,
+                        }
+                        .encrypt(&self.chunk_enc_key)?,
                     )?;
 
                     Ok((1, file_name))
                 }
                 Some(old) => {
-                    let old: ChunkDbEntry = decrypt(&old, &self.chunk_enc_key)?;
+                    let old = ChunkDbEntry::decrypt(&old, &self.chunk_enc_key)?;
 
                     let ref_count = old.ref_count + 1;
 
                     self.chunk_map.insert(
                         key,
-                        encrypt(
-                            &ChunkDbEntry {
-                                file_name: old.file_name.clone(),
-                                ref_count,
-                            },
-                            &self.chunk_enc_key,
-                        )?,
+                        ChunkDbEntry {
+                            file_name: old.file_name.clone(),
+                            ref_count,
+                        }
+                        .encrypt(&self.chunk_enc_key)?,
                     )?;
 
                     Ok((ref_count, old.file_name))
@@ -617,7 +737,7 @@ pub mod structs {
             match self.chunk_map.remove(key)? {
                 None => Ok(None),
                 Some(old) => {
-                    let old: ChunkDbEntry = decrypt(&old, &self.chunk_enc_key)?;
+                    let old = ChunkDbEntry::decrypt(&old, &self.chunk_enc_key)?;
                     if old.ref_count <= 1 {
                         // save old file name for reuse
                         self.state.unused_paths.push(old.file_name.clone());
@@ -626,13 +746,11 @@ pub mod structs {
                         let ref_count = old.ref_count - 1;
                         self.chunk_map.insert(
                             key,
-                            encrypt(
-                                &ChunkDbEntry {
-                                    file_name: old.file_name.clone(),
-                                    ref_count,
-                                },
-                                &self.chunk_enc_key,
-                            )?,
+                            ChunkDbEntry {
+                                file_name: old.file_name.clone(),
+                                ref_count,
+                            }
+                            .encrypt(&self.chunk_enc_key)?,
                         )?;
                         Ok(Some((ref_count, old.file_name)))
                     }
@@ -665,7 +783,7 @@ pub mod structs {
                             Ok,
                         )?
                         .try_into()?;
-                    let chunk_file: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
+                    let chunk_file = ChunkDbEntry::decrypt(&encrypted_data, &self.chunk_enc_key)?;
                     result.insert(key, (chunk_file.ref_count, chunk_file.file_name));
                 }
             }
@@ -676,7 +794,7 @@ pub mod structs {
             match self.chunk_map.get(key)? {
                 None => Ok(None),
                 Some(encrypted_data) => {
-                    let chunk_file: ChunkDbEntry = decrypt(&encrypted_data, &self.chunk_enc_key)?;
+                    let chunk_file = ChunkDbEntry::decrypt(&encrypted_data, &self.chunk_enc_key)?;
                     Ok(Some((chunk_file.ref_count, chunk_file.file_name)))
                 }
             }
@@ -697,89 +815,13 @@ pub mod structs {
         }
     }
 
-    /// Generic function to encrypt data in dedup
-    fn encrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &S, key: &EncKey) -> Result<Vec<u8>> {
-        // generate nonce
-        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
-        // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // convert data to Vec<u8>
-        let serialized_data = bincode::serialize(data)?;
-        // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &serialized_data[..])?;
-        // construct CryptoCtx using the nonce and the encrypted data
-        let ctx = CryptoCtx {
-            nonce,
-            data: encrypted_data,
-        };
-        // convert CryptoCtx to Vec<u8>
-        Ok(bincode::serialize(&ctx)?)
-    }
-
-    /// Generic function to decrypt data encrypted by dedup
-    fn decrypt<S: Serialize + for<'a> Deserialize<'a>>(data: &[u8], key: &EncKey) -> Result<S> {
-        // decode encrypted data to split nonce and encrypted data
-        let ctx = bincode::deserialize::<CryptoCtx>(data)?;
-        // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // decrypt the data
-        let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
-        // convert decrypted data to the target data type
-        Ok(bincode::deserialize(&decrypted_data)?)
-    }
-
-    /// Generic function to compress and encrypt data in dedup
-    fn compress_and_encrypt<S: Serialize + for<'a> Deserialize<'a>>(
-        data: &S,
-        key: &EncKey,
-    ) -> Result<Vec<u8>> {
-        // generate nonce
-        let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
-        // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // convert data to Vec<u8>
-        let serialized_data = bincode::serialize(data)?;
-
-        // compress the data
-        let mut compressor = DeflateEncoder::new(Vec::new(), Compression::default());
-        compressor.write_all(&serialized_data[..])?;
-        let compressed_data = compressor.finish()?;
-        // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &compressed_data[..])?;
-        // construct CryptoCtx using the nonce and the encrypted data
-        let ctx = CryptoCtx {
-            nonce,
-            data: encrypted_data,
-        };
-        // convert CryptoCtx to Vec<u8>
-        Ok(bincode::serialize(&ctx)?)
-    }
-
-    /// Generic function to decrypt and uncompress data encrypted by dedup
-    fn decrypt_and_uncompress<S: Serialize + for<'a> Deserialize<'a>>(
-        data: &[u8],
-        key: &EncKey,
-    ) -> Result<S> {
-        // decode encrypted data to split nonce and encrypted data
-        let ctx = bincode::deserialize::<CryptoCtx>(data)?;
-        // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // decrypt the data
-        let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
-        // decompress decrypted data
-        let mut uncompressed_data = Vec::new();
-        let mut deflater = DeflateDecoder::new(uncompressed_data);
-        deflater.write_all(&decrypted_data)?;
-        uncompressed_data = deflater.finish()?;
-        // deserialize uncompressed data
-        Ok(bincode::deserialize(&uncompressed_data)?)
-    }
-
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     struct InodeDbEntry {
         inode: Inode,
         ref_count: RefCount,
     }
+
+    impl Encrypt for InodeDbEntry {}
 
     #[derive(Debug)]
     struct InodeDb {
@@ -807,7 +849,7 @@ pub mod structs {
                     .try_into()?;
 
                 // Check data
-                let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
+                let entry = InodeDbEntry::decrypt(&encrypted_data, &self.inode_enc_key)?;
                 if key != InodeHash::from(*entry.inode.keyed_hash(&self.inode_hash_key)?.as_bytes())
                 {
                     return Err(DedupError::SelfTestError.into());
@@ -838,24 +880,22 @@ pub mod structs {
             let key = InodeHash::from(*inode.keyed_hash(&self.inode_hash_key)?.as_bytes());
             match self.tree.remove(key)? {
                 Some(old) => {
-                    let old: InodeDbEntry = decrypt(&old, &self.inode_enc_key)?;
+                    let old = InodeDbEntry::decrypt(&old, &self.inode_enc_key)?;
                     let ref_count = old.ref_count + 1;
 
                     self.tree.insert(
                         key,
-                        encrypt(&InodeDbEntry { inode, ref_count }, &self.inode_enc_key)?,
+                        InodeDbEntry { inode, ref_count }.encrypt(&self.inode_enc_key)?,
                     )?;
 
                     Ok((ref_count, key))
                 }
                 None => {
-                    let encrypted_entry = encrypt(
-                        &InodeDbEntry {
-                            inode,
-                            ref_count: 1,
-                        },
-                        &self.inode_enc_key,
-                    )?;
+                    let encrypted_entry = InodeDbEntry {
+                        inode,
+                        ref_count: 1,
+                    }
+                    .encrypt(&self.inode_enc_key)?;
                     self.tree.insert(key, encrypted_entry)?;
                     Ok((1, key))
                 }
@@ -866,19 +906,17 @@ pub mod structs {
             match self.tree.remove(key)? {
                 None => Ok(None),
                 Some(old) => {
-                    let old: InodeDbEntry = decrypt(&old, &self.inode_enc_key)?;
+                    let old = InodeDbEntry::decrypt(&old, &self.inode_enc_key)?;
                     if old.ref_count <= 1 {
                         Ok(Some((0, old.inode)))
                     } else {
                         let ref_count = old.ref_count - 1;
 
-                        let encrypted_entry = encrypt(
-                            &InodeDbEntry {
-                                inode: old.inode.clone(),
-                                ref_count,
-                            },
-                            &self.inode_enc_key,
-                        )?;
+                        let encrypted_entry = InodeDbEntry {
+                            inode: old.inode.clone(),
+                            ref_count,
+                        }
+                        .encrypt(&self.inode_enc_key)?;
                         self.tree.insert(key, encrypted_entry)?;
                         Ok(Some((ref_count, old.inode)))
                     }
@@ -890,7 +928,7 @@ pub mod structs {
             match self.tree.get(key)? {
                 None => Ok(None),
                 Some(encrypted_data) => {
-                    let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
+                    let entry = InodeDbEntry::decrypt(&encrypted_data, &self.inode_enc_key)?;
                     Ok(Some((entry.ref_count, entry.inode)))
                 }
             }
@@ -925,7 +963,7 @@ pub mod structs {
                             Ok,
                         )?
                         .try_into()?;
-                    let entry: InodeDbEntry = decrypt(&encrypted_data, &self.inode_enc_key)?;
+                    let entry = InodeDbEntry::decrypt(&encrypted_data, &self.inode_enc_key)?;
                     result.insert(hash, (entry.ref_count, entry.inode));
                 }
             }
@@ -952,8 +990,8 @@ pub mod structs {
 
             let now = Instant::now();
 
-            let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
-            let dec: Chunk = decrypt_and_uncompress(&enc, &key.into()).unwrap();
+            let enc = testdata.compress_and_encrypt(&key.into()).unwrap();
+            let dec = Chunk::decrypt_and_uncompress(&enc, &key.into()).unwrap();
 
             let elapsed = now.elapsed();
 
@@ -974,11 +1012,11 @@ pub mod structs {
             let testdata = Chunk { data };
 
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
-            let mut enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
+            let mut enc = testdata.compress_and_encrypt(&key.into()).unwrap();
             let last = enc.pop().unwrap();
             enc.push(!last);
 
-            let dec: Result<Chunk> = decrypt_and_uncompress(&enc, &key.into());
+            let dec = Chunk::decrypt_and_uncompress(&enc, &key.into());
             assert!(dec.is_err());
         }
 
@@ -993,10 +1031,10 @@ pub mod structs {
             let testdata = Chunk { data };
 
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
-            let enc = compress_and_encrypt(&testdata, &key.into()).unwrap();
+            let enc = testdata.compress_and_encrypt(&key.into()).unwrap();
             key[0] = !key[0];
 
-            let dec: Result<Chunk> = decrypt_and_uncompress(&enc, &key.into());
+            let dec = Chunk::decrypt_and_uncompress(&enc, &key.into());
             assert!(dec.is_err());
         }
 
@@ -1013,8 +1051,8 @@ pub mod structs {
 
             let now = Instant::now();
 
-            let enc = encrypt(&testdata, &key.into()).unwrap();
-            let dec: Chunk = decrypt(&enc, &key.into()).unwrap();
+            let enc = testdata.encrypt(&key.into()).unwrap();
+            let dec = Chunk::decrypt(&enc, &key.into()).unwrap();
 
             let elapsed = now.elapsed();
 
@@ -1034,11 +1072,11 @@ pub mod structs {
             }
             let testdata = Chunk { data };
             let key = XChaCha20Poly1305::generate_key(&mut OsRng);
-            let mut enc = encrypt(&testdata, &key.into()).unwrap();
+            let mut enc = testdata.encrypt(&key.into()).unwrap();
             let last = enc.pop().unwrap();
             enc.push(!last);
 
-            let dec: Result<Chunk> = decrypt(&enc, &key.into());
+            let dec = Chunk::decrypt(&enc, &key.into());
             assert!(dec.is_err());
         }
 
@@ -1052,10 +1090,10 @@ pub mod structs {
             }
             let testdata = Chunk { data };
             let mut key = XChaCha20Poly1305::generate_key(&mut OsRng);
-            let enc = encrypt(&testdata, &key.into()).unwrap();
+            let enc = testdata.encrypt(&key.into()).unwrap();
             key[0] = !key[0];
 
-            let dec: Result<Chunk> = decrypt(&enc, &key.into());
+            let dec = Chunk::decrypt(&enc, &key.into());
             assert!(dec.is_err());
         }
 
