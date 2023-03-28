@@ -431,7 +431,7 @@ pub mod structs {
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct FilePathGen(u64);
+    struct FilePathGen(u64);
     impl FilePathGen {
         pub fn new() -> FilePathGen {
             FilePathGen::default()
@@ -562,42 +562,42 @@ pub mod structs {
 
     impl error::Error for Error {}
 
-    impl std::convert::From<std::array::TryFromSliceError> for Error {
+    impl From<std::array::TryFromSliceError> for Error {
         fn from(err: std::array::TryFromSliceError) -> Self {
             Error::TryFromSliceError(err)
         }
     }
 
-    impl std::convert::From<String> for Error {
+    impl From<String> for Error {
         fn from(err: String) -> Self {
             Error::OnceCellError(err)
         }
     }
-    impl std::convert::From<Box<bincode::ErrorKind>> for Error {
+    impl From<Box<bincode::ErrorKind>> for Error {
         fn from(err_ptr: Box<bincode::ErrorKind>) -> Self {
             Error::BincodeError(*err_ptr)
         }
     }
 
-    impl std::convert::From<chacha20poly1305::aead::Error> for Error {
+    impl From<chacha20poly1305::aead::Error> for Error {
         fn from(err: chacha20poly1305::aead::Error) -> Self {
             Error::CryptoError(err)
         }
     }
 
-    impl std::convert::From<sled::Error> for Error {
+    impl From<sled::Error> for Error {
         fn from(err: sled::Error) -> Self {
             Error::SledError(err)
         }
     }
 
-    impl std::convert::From<BackrubError> for Error {
+    impl From<BackrubError> for Error {
         fn from(err: BackrubError) -> Self {
             Error::BackrubError(err)
         }
     }
 
-    impl std::convert::From<std::io::Error> for Error {
+    impl From<std::io::Error> for Error {
         fn from(err: std::io::Error) -> Self {
             Error::IoError(err)
         }
@@ -607,8 +607,8 @@ pub mod structs {
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct ChunkDbState {
-        pub unused_paths: Vec<PathBuf>,
-        pub path_gen: FilePathGen,
+        unused_paths: Vec<PathBuf>,
+        path_gen: FilePathGen,
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
