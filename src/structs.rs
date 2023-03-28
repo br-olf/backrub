@@ -22,7 +22,7 @@ pub mod structs {
 
     type RefCount = usize;
 
-    trait Hashable: Serialize {
+    pub trait Hashable: Serialize {
         fn hash(&self) -> Result<blake3::Hash> {
             let serialized = bincode::serialize(self)?;
             Ok(blake3::hash(&serialized))
@@ -35,7 +35,7 @@ pub mod structs {
     }
 
     pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
-        /// Generic function to encrypt data in dedup
+        /// Generic function to encrypt data in backrub
         fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
             // generate nonce
             let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
@@ -54,7 +54,7 @@ pub mod structs {
             Ok(bincode::serialize(&ctx)?)
         }
 
-        /// Generic function to decrypt data encrypted by dedup
+        /// Generic function to decrypt data encrypted by backrub
         fn decrypt(data: &[u8], key: &EncKey) -> Result<Self> {
             // decode encrypted data to split nonce and encrypted data
             let ctx = bincode::deserialize::<CryptoCtx>(data)?;
@@ -66,7 +66,7 @@ pub mod structs {
             Ok(bincode::deserialize(&decrypted_data)?)
         }
 
-        /// Generic function to compress and encrypt data in dedup
+        /// Generic function to compress and encrypt data in backrub
         fn compress_and_encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
             // generate nonce
             let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
@@ -90,7 +90,7 @@ pub mod structs {
             Ok(bincode::serialize(&ctx)?)
         }
 
-        /// Generic function to decrypt and uncompress data encrypted by dedup
+        /// Generic function to decrypt and uncompress data encrypted by backrub
         fn decrypt_and_uncompress(data: &[u8], key: &EncKey) -> Result<Self> {
             // decode encrypted data to split nonce and encrypted data
             let ctx = bincode::deserialize::<CryptoCtx>(data)?;
@@ -485,40 +485,40 @@ pub mod structs {
     use std::{error, fmt};
 
     #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-    pub enum DedupError {
+    pub enum BackrubError {
         SledKeyLengthError,
         SledTreeNotEmpty,
         SelfTestError,
     }
 
-    impl fmt::Display for DedupError {
+    impl fmt::Display for BackrubError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
-                DedupError::SledTreeNotEmpty => {
+                BackrubError::SledTreeNotEmpty => {
                     write!(
                         f,
                         "SledTreeNotEmpty: a sled tree has a length bigger than 0"
                     )
                 }
-                DedupError::SledKeyLengthError => {
+                BackrubError::SledKeyLengthError => {
                     write!(
                         f,
                         "SledKeyLengthError: a sled key seems to be of wrong length"
                     )
                 }
-                DedupError::SelfTestError => {
+                BackrubError::SelfTestError => {
                     write!(f, "SelfTestError: a sled key - value pair is corrupted")
                 }
             }
         }
     }
 
-    impl error::Error for DedupError {}
+    impl error::Error for BackrubError {}
 
     #[derive(Debug)]
     pub enum Error {
         CryptoError(chacha20poly1305::aead::Error),
-        DedupError(DedupError),
+        BackrubError(BackrubError),
         SledError(sled::Error),
         BincodeError(bincode::ErrorKind),
         IoError(std::io::Error),
@@ -530,31 +530,31 @@ pub mod structs {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
                 Error::CryptoError(error) => {
-                    write!(f, "dedup::Error::Crypto: ");
+                    write!(f, "backrub::Error::Crypto: ");
                     error.fmt(f)
                 }
-                Error::DedupError(error) => {
-                    write!(f, "dedup::Error::DedupError: ");
+                Error::BackrubError(error) => {
+                    write!(f, "backrub::Error::BackrubError: ");
                     error.fmt(f)
                 }
                 Error::SledError(error) => {
-                    write!(f, "dedup::Error::SledError: ");
+                    write!(f, "backrub::Error::SledError: ");
                     error.fmt(f)
                 }
                 Error::BincodeError(error) => {
-                    write!(f, "dedup::Error::BincodeError: ");
+                    write!(f, "backrub::Error::BincodeError: ");
                     error.fmt(f)
                 }
                 Error::IoError(error) => {
-                    write!(f, "dedup::Error::IoError: ");
+                    write!(f, "backrub::Error::IoError: ");
                     error.fmt(f)
                 }
                 Error::TryFromSliceError(error) => {
-                    write!(f, "dedup::Error::TryFromSliceError: ");
+                    write!(f, "backrub::Error::TryFromSliceError: ");
                     error.fmt(f)
                 }
                 Error::OnceCellError(msg) => {
-                    write!(f, "dedup::Error::OnceCellError: {}", msg)
+                    write!(f, "backrub::Error::OnceCellError: {}", msg)
                 }
             }
         }
@@ -591,9 +591,9 @@ pub mod structs {
         }
     }
 
-    impl std::convert::From<DedupError> for Error {
-        fn from(err: DedupError) -> Self {
-            Error::DedupError(err)
+    impl std::convert::From<BackrubError> for Error {
+        fn from(err: BackrubError) -> Self {
+            Error::BackrubError(err)
         }
     }
 
@@ -638,13 +638,13 @@ pub mod structs {
                 let (key, encrypted_data) = data?;
                 // Check key
                 if key.len() != HASH_SIZE {
-                    return Err(DedupError::SledKeyLengthError.into());
+                    return Err(BackrubError::SledKeyLengthError.into());
                 }
                 let _: ChunkHash = key
                     .chunks_exact(HASH_SIZE)
                     .next()
                     .map_or_else(
-                        || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                        || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
                         Ok,
                     )?
                     .try_into()?;
@@ -673,10 +673,10 @@ pub mod structs {
 
         /// Creates a new **empty** ChunkDb
         ///
-        /// Returns [`DedupError::SledTreeNotEmpty`] if provided tree is not empty
+        /// Returns [`BackrubError::SledTreeNotEmpty`] if provided tree is not empty
         pub fn new(tree: sled::Tree, chunk_enc_key: EncKey) -> Result<ChunkDb> {
             if tree.len() != 0 {
-                return Err(DedupError::SledTreeNotEmpty.into());
+                return Err(BackrubError::SledTreeNotEmpty.into());
             }
             let cs = ChunkDb {
                 state: ChunkDbState {
@@ -774,13 +774,13 @@ pub mod structs {
             for data in self.chunk_map.iter() {
                 let (key, encrypted_data) = data?;
                 if key.len() != HASH_SIZE {
-                    return Err(DedupError::SledKeyLengthError.into());
+                    return Err(BackrubError::SledKeyLengthError.into());
                 } else {
                     let key: ChunkHash = key
                         .chunks_exact(HASH_SIZE)
                         .next()
                         .map_or_else(
-                            || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                            || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
                             Ok,
                         )?
                         .try_into()?;
@@ -838,13 +838,13 @@ pub mod structs {
 
                 // Check Key
                 if key.len() != HASH_SIZE {
-                    return Err(DedupError::SledKeyLengthError.into());
+                    return Err(BackrubError::SledKeyLengthError.into());
                 }
                 let key: InodeHash = key
                     .chunks_exact(HASH_SIZE)
                     .next()
                     .map_or_else(
-                        || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                        || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
                         Ok,
                     )?
                     .try_into()?;
@@ -853,7 +853,7 @@ pub mod structs {
                 let entry = InodeDbEntry::decrypt(&encrypted_data, &self.inode_enc_key)?;
                 if key != InodeHash::from(*entry.inode.keyed_hash(&self.inode_hash_key)?.as_bytes())
                 {
-                    return Err(DedupError::SelfTestError.into());
+                    return Err(BackrubError::SelfTestError.into());
                 }
             }
             Ok(())
@@ -954,13 +954,13 @@ pub mod structs {
             for data in self.tree.iter() {
                 let (key, encrypted_data) = data?;
                 if key.len() != HASH_SIZE {
-                    return Err(DedupError::SledKeyLengthError.into());
+                    return Err(BackrubError::SledKeyLengthError.into());
                 } else {
                     let hash: InodeHash = key
                         .chunks_exact(HASH_SIZE)
                         .next()
                         .map_or_else(
-                            || Err::<&[u8], DedupError>(DedupError::SledKeyLengthError),
+                            || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
                             Ok,
                         )?
                         .try_into()?;

@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 //use serde::{Deserialize, Serialize};
-use dedup::*;
+use backrub::*;
 
 const APPNAME: &str = "dedup";
 const TREE_EXTENSION: &str = "tree.json.zip";
@@ -183,7 +183,7 @@ fn parse_config() {
         }
     }
 }
-use dedup::structs::structs::*;
+use backrub::structs::structs::*;
 use sled::{Error, IVec};
 use std::convert::TryInto;
 use once_cell::sync::OnceCell;
