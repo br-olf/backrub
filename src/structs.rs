@@ -312,6 +312,19 @@ pub mod structs {
 
     //type BackupHash = [u8; HASH_SIZE];
 
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    pub struct BackupConf {
+        follow_symlinks: bool
+    }
+
+    impl Default for BackupConf {
+        fn default() -> Self {
+            BackupConf{
+                follow_symlinks: false,
+            }
+        }
+    }
+
     #[derive(Debug)]
     pub struct BackupManager {
         inode_db: Mutex<InodeDb>,
@@ -329,7 +342,7 @@ pub mod structs {
             Ok(manager)
         }
 
-        fn create_backup(name: &str, path: &Path) -> Result<()> {
+        fn create_backup(name: &str, path: &Path, conf: &BackupConf) -> Result<()> {
             todo!()
         }
 
@@ -367,14 +380,23 @@ pub mod structs {
         maximum_chunk_size: usize,
     }
 
+    #[derive(Clone, Default, Debug, Serialize, Deserialize)]
+    pub struct SignedManifest {
+        signature: [u8; 32],
+        data: Vec<u8>,
+    }
+
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Manifest {
         salt: [u8; 32],
         chunk_root_dir: PathBuf,
-        backup_db_path: PathBuf,
-        inode_db_path: PathBuf,
+        db_path: PathBuf,
         version: String,
         chunker_conf: ChunkerConf,
+        enc_chunk_hash_key: EncKey,
+        enc_chunk_enc_key: EncKey,
+        enc_inode_hash_key: EncKey,
+        enc_inode_enc_key: EncKey,
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
