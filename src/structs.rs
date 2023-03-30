@@ -19,6 +19,7 @@ pub mod structs {
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
     const NONCE_SIZE: usize = 24;
+    const CRYPTO_KEYS_SIZE: usize = KEY_SIZE * 4;
 
     type RefCount = usize;
 
@@ -419,8 +420,8 @@ pub mod structs {
         key_inode_enc_key: EncKey,
     }
 
-    impl From<[u8; KEY_SIZE * 4]> for KeyEncryptionKeys {
-        fn from(keys: [u8; KEY_SIZE * 4]) -> Self {
+    impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
+        fn from(keys: [u8; CRYPTO_KEYS_SIZE]) -> Self {
             let mut n = KEY_SIZE;
             let key_chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
                 .expect("This can not fail because we take care of the correct size here");
@@ -453,7 +454,7 @@ pub mod structs {
 
     impl CryptoKeys {
         fn new() -> Self {
-            let mut keys = [0u8; KEY_SIZE * 4];
+            let mut keys = [0u8; CRYPTO_KEYS_SIZE];
             OsRng.fill_bytes(&mut keys);
             let mut n = KEY_SIZE;
             let chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
@@ -1317,7 +1318,7 @@ pub mod structs {
         fn test_CryptoKeys_encryption() {
             let ck = CryptoKeys::new();
 
-            let mut raw_keys = [0u8; KEY_SIZE * 4];
+            let mut raw_keys = [0u8; CRYPTO_KEYS_SIZE];
             OsRng.fill_bytes(&mut raw_keys);
             let kek = KeyEncryptionKeys::from(raw_keys);
 
