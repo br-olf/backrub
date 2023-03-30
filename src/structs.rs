@@ -190,6 +190,18 @@ pub mod structs {
         pub fn as_array(&self) -> [u8; KEY_SIZE] {
             self.0
         }
+
+        pub fn xor_keys(&self, key: &EncKey) -> EncKey {
+            let l = self.as_array();
+            let r = key.as_array();
+            let l_iter = l.iter();
+            let r_iter = r.iter();
+            let result: Vec<u8> = l_iter.zip(r_iter).map(|(l, r)| l ^ r).collect();
+            let result: [u8; KEY_SIZE] = result
+                .try_into()
+                .expect("This can never fail because all length match");
+            EncKey::from(result)
+        }
     }
 
     impl From<[u8; KEY_SIZE]> for EncKey {
@@ -314,12 +326,12 @@ pub mod structs {
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
     pub struct BackupConf {
-        follow_symlinks: bool
+        follow_symlinks: bool,
     }
 
     impl Default for BackupConf {
         fn default() -> Self {
-            BackupConf{
+            BackupConf {
                 follow_symlinks: false,
             }
         }
@@ -380,10 +392,92 @@ pub mod structs {
         maximum_chunk_size: usize,
     }
 
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct EncCryptoKeys {
+        enc_chunk_hash_key: EncKey,
+        enc_chunk_enc_key: EncKey,
+        enc_inode_hash_key: EncKey,
+        enc_inode_enc_key: EncKey,
+    }
+
+    impl EncCryptoKeys {
+        fn decrypt(&self, keys: KeyEncryptionKeys) -> CryptoKeys {
+            CryptoKeys {
+                chunk_hash_key: self.enc_chunk_hash_key.xor_keys(&keys.key_chunk_hash_key),
+                chunk_enc_key: self.enc_chunk_enc_key.xor_keys(&keys.key_chunk_enc_key),
+                inode_hash_key: self.enc_inode_hash_key.xor_keys(&keys.key_inode_hash_key),
+                inode_enc_key: self.enc_inode_enc_key.xor_keys(&keys.key_inode_enc_key),
+            }
+        }
+    }
+
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct KeyEncryptionKeys {
+        key_chunk_hash_key: EncKey,
+        key_chunk_enc_key: EncKey,
+        key_inode_hash_key: EncKey,
+        key_inode_enc_key: EncKey,
+    }
+
+    impl From<[u8; KEY_SIZE * 4]> for KeyEncryptionKeys {
+        fn from(keys: [u8; KEY_SIZE * 4]) -> Self {
+            let mut n = KEY_SIZE;
+            let key_chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let key_chunk_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let key_inode_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let key_inode_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+
+            KeyEncryptionKeys {
+                key_chunk_hash_key,
+                key_chunk_enc_key,
+                key_inode_hash_key,
+                key_inode_enc_key,
+            }
+        }
+    }
+
+    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    struct CryptoKeys {
+        chunk_hash_key: EncKey,
+        chunk_enc_key: EncKey,
+        inode_hash_key: EncKey,
+        inode_enc_key: EncKey,
+    }
+
+    impl CryptoKeys {
+        fn encrypt(&self, keys: KeyEncryptionKeys) -> EncCryptoKeys {
+            EncCryptoKeys {
+                enc_chunk_hash_key: self.chunk_hash_key.xor_keys(&keys.key_chunk_hash_key),
+                enc_chunk_enc_key: self.chunk_enc_key.xor_keys(&keys.key_chunk_enc_key),
+                enc_inode_hash_key: self.inode_hash_key.xor_keys(&keys.key_inode_hash_key),
+                enc_inode_enc_key: self.inode_enc_key.xor_keys(&keys.key_inode_enc_key),
+            }
+        }
+    }
+
     #[derive(Clone, Default, Debug, Serialize, Deserialize)]
     pub struct SignedManifest {
+        manifest: Manifest,
         signature: [u8; 32],
-        data: Vec<u8>,
+    }
+
+    impl SignedManifest {
+        pub fn verify(&self, key: &EncKey) -> Result<Manifest> {
+            let self_ = (*self).clone();
+            let verify = *self.manifest.keyed_hash(key)?.as_bytes();
+            if verify != self_.signature {
+                Err(BackrubError::InvalidSignature.into())
+            } else {
+                Ok(self_.manifest)
+            }
+        }
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -393,10 +487,23 @@ pub mod structs {
         db_path: PathBuf,
         version: String,
         chunker_conf: ChunkerConf,
-        enc_chunk_hash_key: EncKey,
-        enc_chunk_enc_key: EncKey,
-        enc_inode_hash_key: EncKey,
-        enc_inode_enc_key: EncKey,
+        keys: EncCryptoKeys,
+        compleated_backups: usize,
+    }
+
+    impl Hashable for Manifest {}
+
+    impl Manifest {
+        //        pub fn new()
+
+        pub fn sign(&self, key: &EncKey) -> Result<SignedManifest> {
+            let manifest = (*self).clone();
+            let signature = *self.keyed_hash(key)?.as_bytes();
+            Ok(SignedManifest {
+                manifest,
+                signature,
+            })
+        }
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -511,11 +618,18 @@ pub mod structs {
         SledKeyLengthError,
         SledTreeNotEmpty,
         SelfTestError,
+        InvalidSignature,
     }
 
     impl fmt::Display for BackrubError {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
+                BackrubError::InvalidSignature => {
+                    write!(
+                        f,
+                        "InvalidSignature: a signature is invalid, this could be a sign of tampering"
+                    )
+                }
                 BackrubError::SledTreeNotEmpty => {
                     write!(
                         f,
