@@ -1,7 +1,7 @@
 pub mod structs {
     use async_std::sync::Mutex;
     use chacha20poly1305::{
-        aead::{Aead, AeadCore, KeyInit, OsRng},
+        aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng},
         XChaCha20Poly1305,
     };
     use flate2::write::{DeflateDecoder, DeflateEncoder};
@@ -449,6 +449,32 @@ pub mod structs {
         chunk_enc_key: EncKey,
         inode_hash_key: EncKey,
         inode_enc_key: EncKey,
+    }
+
+    impl CryptoKeys {
+        fn new() -> Self {
+            let mut keys = [0u8; KEY_SIZE * 4];
+            OsRng.fill_bytes(&mut keys);
+            let mut n = KEY_SIZE;
+            let chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let chunk_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let inode_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+            n += KEY_SIZE;
+            let inode_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+                .expect("This can not fail because we take care of the correct size here");
+
+            CryptoKeys {
+                chunk_hash_key,
+                chunk_enc_key,
+                inode_hash_key,
+                inode_enc_key,
+            }
+        }
     }
 
     impl CryptoKeys {
@@ -1285,6 +1311,20 @@ pub mod structs {
             assert_eq!(cs.remove(&h1).unwrap(), None);
 
             assert_eq!(cs.insert(&h4).unwrap(), (1, PathBuf::from("1.bin")));
+        }
+
+        #[test]
+        fn test_CryptoKeys_encryption() {
+            let ck = CryptoKeys::new();
+
+            let mut raw_keys = [0u8; KEY_SIZE * 4];
+            OsRng.fill_bytes(&mut raw_keys);
+            let kek = KeyEncryptionKeys::from(raw_keys);
+
+            let enc_keys = ck.encrypt(kek.clone());
+            let dec_keys = enc_keys.decrypt(kek);
+
+            assert_eq!(ck, dec_keys);
         }
     }
 }
