@@ -373,6 +373,12 @@ pub mod structs {
 
             // Only now we are sure that no tapering occured in manifest!
 
+            let key_encryption_keys: Vec<u8> = crypto_root.drain(..CRYPTO_KEYS_SIZE).collect();
+            let key_encryption_keys = <[u8;CRYPTO_KEYS_SIZE]>::try_from(key_encryption_keys.as_slice())?;
+            let key_encryption_keys = KeyEncryptionKeys::from(key_encryption_keys);
+
+            let keys = manifest.keys.decrypt(key_encryption_keys);
+
             let manager: BackupManager = todo!();
 
             Ok(manager)
