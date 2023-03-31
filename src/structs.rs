@@ -9,6 +9,7 @@ pub mod structs {
     use generic_array::GenericArray;
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
+    use std::fs;
     use std::io::prelude::*;
     use std::path::{Path, PathBuf};
     use typenum::{
@@ -16,10 +17,14 @@ pub mod structs {
         uint::{UInt, UTerm},
     };
 
+    const SALT_SIZE: usize = 32;
     const HASH_SIZE: usize = 32;
     const KEY_SIZE: usize = 32;
     const NONCE_SIZE: usize = 24;
     const CRYPTO_KEYS_SIZE: usize = KEY_SIZE * 4;
+    const SIG_SIZE: usize = 32;
+
+    const TOTAL_KEY_SIZE: usize = CRYPTO_KEYS_SIZE + SIG_SIZE;
 
     type RefCount = usize;
 
@@ -343,6 +348,7 @@ pub mod structs {
         inode_db: Mutex<InodeDb>,
         chunk_db: Mutex<ChunkDb>,
         manifest: Manifest,
+        keys: CryptoKeys,
     }
 
     impl BackupManager {
@@ -350,6 +356,25 @@ pub mod structs {
             manifest_path: &Path,
             password: &str,
         ) -> Result<BackupManager> {
+            let manifest =
+                fs::read_to_string(manifest_path).expect("Should have been able to read the file");
+
+            let manifest: SignedManifest = serde_json::from_str(&manifest)?;
+
+
+            let mut crypto_root = argon2::hash_raw(
+                password.as_bytes(),
+                &manifest.get_salt(),
+                &manifest.get_argon2config()?,
+            )?;
+
+            let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
+            let sig_key = EncKey::try_from(sig_key.as_slice())?;
+
+            let manifest = manifest.verify(&sig_key)?;
+
+            // Only now we are sure that no tapering occured in manifest!
+
             let manager: BackupManager = todo!();
 
             Ok(manager)
@@ -489,6 +514,43 @@ pub mod structs {
         }
     }
 
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct Argon2Conf {
+        pub threads: u32,
+        pub mem_cost: u32,
+        pub time_cost: u32,
+        pub variant: u32,
+        pub version: u32,
+    }
+
+    impl Default for Argon2Conf {
+        fn default() -> Self {
+            Argon2Conf {
+                threads: 4,
+                mem_cost: 1024 * 1024 * 2, // 2 GB per thread => 8GB total
+                time_cost: 20,             // very conservative value
+                variant: argon2::Variant::Argon2id.as_u32(),
+                version: argon2::Version::Version13.as_u32(),
+            }
+        }
+    }
+
+    impl Argon2Conf {
+        pub fn as_argon2config(&self) -> Result<argon2::Config> {
+            Ok(argon2::Config {
+                ad: &[],
+                hash_length: TOTAL_KEY_SIZE as u32,
+                lanes: self.threads,
+                mem_cost: self.mem_cost,
+                secret: &[],
+                thread_mode: argon2::ThreadMode::from_threads(self.threads),
+                time_cost: self.time_cost,
+                variant: argon2::Variant::from_u32(self.variant)?,
+                version: argon2::Version::from_u32(self.version)?,
+            })
+        }
+    }
+
     #[derive(Clone, Default, Debug, Serialize, Deserialize)]
     pub struct SignedManifest {
         manifest: Manifest,
@@ -505,17 +567,25 @@ pub mod structs {
                 Ok(self_.manifest)
             }
         }
+        pub fn get_salt(&self) -> [u8; SALT_SIZE] {
+            self.manifest.salt
+        }
+
+        pub fn get_argon2config(&self) -> Result<argon2::Config> {
+            self.manifest.argon2_conf.as_argon2config()
+        }
     }
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Manifest {
-        salt: [u8; 32],
+        salt: [u8; SALT_SIZE],
         chunk_root_dir: PathBuf,
         db_path: PathBuf,
         version: String,
         chunker_conf: ChunkerConf,
         keys: EncCryptoKeys,
-        compleated_backups: usize,
+        //completed_backups: BTreeMap<BackupHash,Vec<u8>>,
+        argon2_conf: Argon2Conf,
     }
 
     impl Hashable for Manifest {}
@@ -687,13 +757,19 @@ pub mod structs {
         IoError(std::io::Error),
         TryFromSliceError(std::array::TryFromSliceError),
         OnceCellError(String),
+        SerdeJsonError(serde_json::Error),
+        Argon2Error(argon2::Error),
     }
 
     impl fmt::Display for Error {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
+                Error::Argon2Error(error) => {
+                    write!(f, "backrub::Error::Argon2Error: ");
+                    error.fmt(f)
+                }
                 Error::CryptoError(error) => {
-                    write!(f, "backrub::Error::Crypto: ");
+                    write!(f, "backrub::Error::CryptoError: ");
                     error.fmt(f)
                 }
                 Error::BackrubError(error) => {
@@ -719,11 +795,27 @@ pub mod structs {
                 Error::OnceCellError(msg) => {
                     write!(f, "backrub::Error::OnceCellError: {}", msg)
                 }
+                Error::SerdeJsonError(error) => {
+                    write!(f, "backrub::Error::SerdeJsonError: ");
+                    error.fmt(f)
+                }
             }
         }
     }
 
     impl error::Error for Error {}
+
+    impl From<argon2::Error> for Error {
+        fn from(err: argon2::Error) -> Self {
+            Error::Argon2Error(err)
+        }
+    }
+
+    impl From<serde_json::Error> for Error {
+        fn from(err: serde_json::Error) -> Self {
+            Error::SerdeJsonError(err)
+        }
+    }
 
     impl From<std::array::TryFromSliceError> for Error {
         fn from(err: std::array::TryFromSliceError) -> Self {
