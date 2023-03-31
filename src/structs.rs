@@ -356,11 +356,9 @@ pub mod structs {
             manifest_path: &Path,
             password: &str,
         ) -> Result<BackupManager> {
-            let manifest =
-                fs::read_to_string(manifest_path).expect("Should have been able to read the file");
+            let manifest = fs::read_to_string(manifest_path)?;
 
             let manifest: SignedManifest = serde_json::from_str(&manifest)?;
-
 
             let mut crypto_root = argon2::hash_raw(
                 password.as_bytes(),
