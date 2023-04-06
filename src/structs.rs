@@ -22,9 +22,9 @@ pub mod structs {
     const KEY_SIZE: usize = 32;
     const NONCE_SIZE: usize = 24;
     const CRYPTO_KEYS_SIZE: usize = KEY_SIZE * 4;
-    const SIG_SIZE: usize = 32;
 
-    const TOTAL_KEY_SIZE: usize = CRYPTO_KEYS_SIZE + SIG_SIZE;
+    // Signature key for manifest + encrypted keys for data
+    const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
 
     type RefCount = usize;
 
@@ -379,7 +379,27 @@ pub mod structs {
 
             let keys = manifest.keys.decrypt(key_encryption_keys);
 
-            let manager: BackupManager = todo!();
+            // read database
+
+            let db: sled::Db = sled::open(manifest.db_path.clone())?;
+
+            let inode_tree = db.open_tree(b"inodes")?;
+            let chunk_tree = db.open_tree(b"chunks")?;
+
+            let inode_db = InodeDb::new(inode_tree,
+                                        keys.inode_enc_key,
+                                        keys.inode_hash_key)?;
+
+            let chunk_db = ChunkDb::restore(chunk_tree,
+                                            keys.chunk_enc_key,
+                                            manifest.chunk_db_state.clone())?;
+
+
+            let manager = BackupManager{
+                inode_db: Mutex::new(inode_db),
+                chunk_db: Mutex::new(chunk_db),
+                manifest,
+                keys};
 
             Ok(manager)
         }
@@ -555,7 +575,7 @@ pub mod structs {
         }
     }
 
-    #[derive(Clone, Default, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct SignedManifest {
         manifest: Manifest,
         signature: [u8; 32],
@@ -580,7 +600,7 @@ pub mod structs {
         }
     }
 
-    #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Manifest {
         salt: [u8; SALT_SIZE],
         chunk_root_dir: PathBuf,
@@ -590,6 +610,7 @@ pub mod structs {
         keys: EncCryptoKeys,
         //completed_backups: BTreeMap<BackupHash,Vec<u8>>,
         argon2_conf: Argon2Conf,
+        chunk_db_state: ChunkDbState,
     }
 
     impl Hashable for Manifest {}
