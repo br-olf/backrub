@@ -183,7 +183,7 @@ fn parse_config() {
         }
     }
 }
-use backrub::structs::structs::*;
+use backrub::structs::*;
 use sled::{Error, IVec};
 use std::convert::TryInto;
 use once_cell::sync::OnceCell;
