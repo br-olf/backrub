@@ -16,6 +16,7 @@ use typenum::{
     bit::{B0, B1},
     uint::{UInt, UTerm},
 };
+use futures::executor::block_on;
 
 const SALT_SIZE: usize = 32;
 const HASH_SIZE: usize = 32;
@@ -391,6 +392,7 @@ pub struct BackupManager {
     chunk_db: Mutex<ChunkDb>,
     manifest: Manifest,
     keys: CryptoKeys,
+    sig_key: EncKey,
 }
 
 impl BackupManager {
@@ -423,8 +425,10 @@ impl BackupManager {
         let keys = manifest.keys.decrypt(key_encryption_keys);
 
         // read database
-
         let db: sled::Db = sled::open(manifest.db_path.clone())?;
+        if !db.was_recovered() {
+            return Err(BackrubError::SledDbDidNotExist(manifest.db_path).into());
+        }
 
         let inode_tree = db.open_tree(b"inodes")?;
         let chunk_tree = db.open_tree(b"chunks")?;
@@ -442,12 +446,13 @@ impl BackupManager {
             chunk_db: Mutex::new(chunk_db),
             manifest,
             keys,
+            sig_key,
         };
 
         Ok(manager)
     }
 
-    fn new(config: BackupManagerConf, password: &str) -> Result<BackupManager> {
+    pub fn new(config: BackupManagerConf, password: &str) -> Result<BackupManager> {
         let mut salt = [0u8; SALT_SIZE];
         OsRng.fill_bytes(&mut salt);
 
@@ -456,20 +461,82 @@ impl BackupManager {
             &salt,
             &config.argon2_conf.as_argon2config()?)?;
 
+        // Derive signature key
         let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
-        let sig_key = EncKey::try_from(sig_key.as_slice());
+        let sig_key = EncKey::try_from(sig_key.as_slice())?;
 
-
+        // Derive keys
         let key_encryption_keys: Vec<u8> = crypto_root.drain(..CRYPTO_KEYS_SIZE).collect();
         let key_encryption_keys =
             <[u8; CRYPTO_KEYS_SIZE]>::try_from(key_encryption_keys.as_slice())?;
         let key_encryption_keys = KeyEncryptionKeys::from(key_encryption_keys);
 
-        let raw_keys = CryptoKeys::new();
+        let keys = CryptoKeys::new();
 
-        let keys = raw_keys.encrypt(key_encryption_keys);
+        let enc_keys = keys.encrypt(key_encryption_keys);
 
-        todo!()
+        // create database
+        let db: sled::Db = sled::open(config.clone().db_path)?;
+        if db.was_recovered() {
+            return Err(BackrubError::SledDbAlreadyExists(config.db_path).into());
+        }
+
+        // setup inode and chunk databases
+        let inode_tree = db.open_tree(b"inodes")?;
+        let chunk_tree = db.open_tree(b"chunks")?;
+
+        let inode_db = InodeDb::new(inode_tree, keys.inode_enc_key, keys.inode_hash_key)?;
+        let chunk_db = ChunkDb::new(chunk_tree, keys.chunk_enc_key)?;
+
+        // create Manifest
+        let manifest = Manifest {
+            salt: salt,
+            chunk_root_dir: config.chunk_root_dir,
+            db_path: config.db_path,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            chunker_conf: config.chunker_conf,
+            keys: enc_keys,
+            argon2_conf: config.argon2_conf,
+            chunk_db_state: chunk_db.state.clone(),
+        };
+
+        // create BackupManager
+        let manager = BackupManager {
+            inode_db: Mutex::new(inode_db),
+            chunk_db: Mutex::new(chunk_db),
+            manifest,
+            keys,
+            sig_key,
+        };
+
+        // write Manifest
+        manager.write_manifet(config.manifest_path.as_path())?;
+
+        Ok(manager)
+    }
+
+    fn write_manifet(&self, manifest_path: &Path) -> Result<()> {
+        // Lock all mutex
+        let chunk_db = block_on(self.chunk_db.lock());
+
+
+        // copy manifest
+        let mut manifest = self.manifest.clone();
+
+        // update manifest
+        manifest.chunk_db_state = chunk_db.state.clone();
+
+        // sign manifest
+        let signed = manifest.sign(&self.sig_key)?;
+
+        // serialize
+        let manifest_json = serde_json::to_string(&signed)?;
+
+        // write manifest
+        let mut file = fs::File::create(manifest_path)?;
+        file.write_all(manifest_json.as_bytes())?;
+
+        Ok(())
     }
 
     fn create_backup(name: &str, path: &Path, conf: &BackupConf) -> Result<()> {
@@ -807,6 +874,8 @@ use std::{error, fmt};
 pub enum BackrubError {
     SledKeyLengthError,
     SledTreeNotEmpty,
+    SledDbAlreadyExists(PathBuf),
+    SledDbDidNotExist(PathBuf),
     SelfTestError,
     InvalidSignature,
 }
@@ -818,6 +887,20 @@ impl fmt::Display for BackrubError {
                 write!(
                     f,
                     "InvalidSignature: a signature is invalid, this could be a sign of tampering"
+                )
+            }
+            BackrubError::SledDbAlreadyExists(path) => {
+                write!(
+                    f,
+                    "SledDbAlreadyExists: a sled database is already existing at given path \"{}\"",
+                    path.display()
+                )
+            }
+            BackrubError::SledDbDidNotExist(path) => {
+                write!(
+                    f,
+                    "SledDbDidNotExist: a sled database was NOT existing at given path \"{}\"",
+                    path.display()
                 )
             }
             BackrubError::SledTreeNotEmpty => {
