@@ -516,9 +516,8 @@ impl BackupManager {
     }
 
     fn write_manifet(&self, manifest_path: &Path) -> Result<()> {
-        // Lock all mutex
+        // Lock mutex
         let chunk_db = block_on(self.chunk_db.lock());
-
 
         // copy manifest
         let mut manifest = self.manifest.clone();
@@ -924,115 +923,63 @@ impl fmt::Display for BackrubError {
 
 impl error::Error for BackrubError {}
 
+macro_rules! impl_error_enum{
+    (
+     $(#[$meta:meta])*
+     $vis:vis enum $enum_name:ident {
+        $(
+        $(#[$field_meta:meta])*
+        $field_type:ident ( $enc_type:ty )
+        ),*$(,)+
+    }
+    ) => {
+       $(#[$meta])*
+       $vis enum $enum_name{
+           $(
+           $(#[$field_meta:meta])*
+           $field_type ( $enc_type ),
+           )*
+       }
+
+       impl fmt::Display for $enum_name {
+           fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+               match self {
+                   $($enum_name::$field_type ( error ) => {
+                       write!(f, "backrub::{}::{}: ", stringify!($enum_name), stringify!($field_type))?;
+                       error.fmt(f)
+                   })*
+
+               }
+           }
+       }
+
+       $(
+       impl From<$enc_type> for $enum_name {
+          fn from(err: $enc_type) -> Self {
+              $enum_name::$field_type(err)
+          }
+       }
+       )*
+
+       impl std::error::Error for $enum_name {}
+    }
+}
+
+
+impl_error_enum!(
 #[derive(Debug)]
 pub enum Error {
     CryptoError(chacha20poly1305::aead::Error),
     BackrubError(BackrubError),
     SledError(sled::Error),
-    BincodeError(bincode::ErrorKind),
+    BincodeError(Box<bincode::ErrorKind>),
     IoError(std::io::Error),
     TryFromSliceError(std::array::TryFromSliceError),
     OnceCellError(String),
     SerdeJsonError(serde_json::Error),
     Argon2Error(argon2::Error),
-}
+});
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::Argon2Error(error) => {
-                write!(f, "backrub::Error::Argon2Error: ");
-                error.fmt(f)
-            }
-            Error::CryptoError(error) => {
-                write!(f, "backrub::Error::CryptoError: ");
-                error.fmt(f)
-            }
-            Error::BackrubError(error) => {
-                write!(f, "backrub::Error::BackrubError: ");
-                error.fmt(f)
-            }
-            Error::SledError(error) => {
-                write!(f, "backrub::Error::SledError: ");
-                error.fmt(f)
-            }
-            Error::BincodeError(error) => {
-                write!(f, "backrub::Error::BincodeError: ");
-                error.fmt(f)
-            }
-            Error::IoError(error) => {
-                write!(f, "backrub::Error::IoError: ");
-                error.fmt(f)
-            }
-            Error::TryFromSliceError(error) => {
-                write!(f, "backrub::Error::TryFromSliceError: ");
-                error.fmt(f)
-            }
-            Error::OnceCellError(msg) => {
-                write!(f, "backrub::Error::OnceCellError: {}", msg)
-            }
-            Error::SerdeJsonError(error) => {
-                write!(f, "backrub::Error::SerdeJsonError: ");
-                error.fmt(f)
-            }
-        }
-    }
-}
-
-impl error::Error for Error {}
-
-impl From<argon2::Error> for Error {
-    fn from(err: argon2::Error) -> Self {
-        Error::Argon2Error(err)
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(err: serde_json::Error) -> Self {
-        Error::SerdeJsonError(err)
-    }
-}
-
-impl From<std::array::TryFromSliceError> for Error {
-    fn from(err: std::array::TryFromSliceError) -> Self {
-        Error::TryFromSliceError(err)
-    }
-}
-
-impl From<String> for Error {
-    fn from(err: String) -> Self {
-        Error::OnceCellError(err)
-    }
-}
-impl From<Box<bincode::ErrorKind>> for Error {
-    fn from(err_ptr: Box<bincode::ErrorKind>) -> Self {
-        Error::BincodeError(*err_ptr)
-    }
-}
-
-impl From<chacha20poly1305::aead::Error> for Error {
-    fn from(err: chacha20poly1305::aead::Error) -> Self {
-        Error::CryptoError(err)
-    }
-}
-
-impl From<sled::Error> for Error {
-    fn from(err: sled::Error) -> Self {
-        Error::SledError(err)
-    }
-}
-
-impl From<BackrubError> for Error {
-    fn from(err: BackrubError) -> Self {
-        Error::BackrubError(err)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Error::IoError(err)
-    }
-}
 
 type Result<T> = std::result::Result<T, Error>;
 
