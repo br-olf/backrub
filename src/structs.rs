@@ -5,18 +5,18 @@ use chacha20poly1305::{
 };
 use flate2::write::{DeflateDecoder, DeflateEncoder};
 use flate2::Compression;
+use futures::executor::block_on;
 use generic_array::GenericArray;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs;
 use std::env;
+use std::fs;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use typenum::{
     bit::{B0, B1},
     uint::{UInt, UTerm},
 };
-use futures::executor::block_on;
 
 const SALT_SIZE: usize = 32;
 const HASH_SIZE: usize = 32;
@@ -338,7 +338,6 @@ impl Default for BackupConf {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackupManagerConf {
     chunk_root_dir: PathBuf,
@@ -362,21 +361,21 @@ impl Default for BackupManagerConf {
         let mut manifest_path = _pwd.clone();
         manifest_path.push("backrub.manifest");
 
-        let chunker_conf = ChunkerConf{
-            minimum_chunk_size:  4 * 1024*1024,
-            average_chunk_size: 16 * 1024*1024,
-            maximum_chunk_size: 64 * 1024*1024,
+        let chunker_conf = ChunkerConf {
+            minimum_chunk_size: 4 * 1024 * 1024,
+            average_chunk_size: 16 * 1024 * 1024,
+            maximum_chunk_size: 64 * 1024 * 1024,
         };
 
-        let argon2_conf = Argon2Conf{
+        let argon2_conf = Argon2Conf {
             threads: 4,
-            mem_cost: 2 * 1024*1024*1024,
+            mem_cost: 2 * 1024 * 1024 * 1024,
             time_cost: 2,
             variant: argon2::Variant::Argon2id.as_u32(),
             version: argon2::Version::Version13.as_u32(),
         };
 
-        return BackupManagerConf{
+        return BackupManagerConf {
             chunk_root_dir,
             db_path,
             manifest_path,
@@ -459,7 +458,8 @@ impl BackupManager {
         let mut crypto_root = argon2::hash_raw(
             password.as_bytes(),
             &salt,
-            &config.argon2_conf.as_argon2config()?)?;
+            &config.argon2_conf.as_argon2config()?,
+        )?;
 
         // Derive signature key
         let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
@@ -965,21 +965,19 @@ macro_rules! impl_error_enum{
     }
 }
 
-
 impl_error_enum!(
-#[derive(Debug)]
-pub enum Error {
-    CryptoError(chacha20poly1305::aead::Error),
-    BackrubError(BackrubError),
-    SledError(sled::Error),
-    BincodeError(Box<bincode::ErrorKind>),
-    IoError(std::io::Error),
-    TryFromSliceError(std::array::TryFromSliceError),
-    OnceCellError(String),
-    SerdeJsonError(serde_json::Error),
-    Argon2Error(argon2::Error),
-});
-
+    #[derive(Debug)]
+    pub enum Error {
+        CryptoError(chacha20poly1305::aead::Error),
+        BackrubError(BackrubError),
+        SledError(sled::Error),
+        BincodeError(Box<bincode::ErrorKind>),
+        IoError(std::io::Error),
+        TryFromSliceError(std::array::TryFromSliceError),
+        SerdeJsonError(serde_json::Error),
+        Argon2Error(argon2::Error),
+    }
+);
 
 type Result<T> = std::result::Result<T, Error>;
 
