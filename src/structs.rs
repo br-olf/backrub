@@ -945,7 +945,7 @@ macro_rules! impl_error_enum{
            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                match self {
                    $($enum_name::$field_type ( error ) => {
-                       write!(f, "backrub::{}::{}: ", stringify!($enum_name), stringify!($field_type))?;
+                       write!(f, "{}::{}: ", stringify!($enum_name), stringify!($field_type))?;
                        error.fmt(f)
                    })*
 
