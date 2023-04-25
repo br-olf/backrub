@@ -869,6 +869,9 @@ pub struct CryptoCtx {
 
 use std::{error, fmt};
 
+/// Error type for errors that are specific for backrub.
+///
+/// For all practical purposes this will be wrapped into [Error].
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BackrubError {
     SledKeyLengthError,
@@ -966,6 +969,9 @@ macro_rules! impl_error_enum{
 }
 
 impl_error_enum!(
+    /// Encapsulating error type for all possible kinds of errors in backrub.
+    ///
+    /// This is [Error] is used by [Result].
     #[derive(Debug)]
     pub enum Error {
         CryptoError(chacha20poly1305::aead::Error),
@@ -979,7 +985,8 @@ impl_error_enum!(
     }
 );
 
-type Result<T> = std::result::Result<T, Error>;
+/// Backrub specific result wrapper, using [Error].
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkDbState {
