@@ -928,43 +928,42 @@ impl error::Error for BackrubError {}
 
 macro_rules! impl_error_enum{
     (
-     $(#[$meta:meta])*
-     $vis:vis enum $enum_name:ident {
-        $(
-        $(#[$field_meta:meta])*
-        $field_type:ident ( $enc_type:ty )
-        ),*$(,)+
-    }
+        $(#[$meta:meta])*
+        $vis:vis enum $enum_name:ident {
+            $(
+            $(#[$field_meta:meta])*
+            $field_type:ident ( $enc_type:ty )
+            ),*$(,)+
+        }
     ) => {
-       $(#[$meta])*
-       $vis enum $enum_name{
-           $(
-           $(#[$field_meta:meta])*
-           $field_type ( $enc_type ),
-           )*
-       }
+        $(#[$meta])*
+        $vis enum $enum_name{
+            $(
+            $(#[$field_meta:meta])*
+            $field_type ( $enc_type ),
+            )*
+        }
 
-       impl fmt::Display for $enum_name {
-           fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-               match self {
-                   $($enum_name::$field_type ( error ) => {
-                       write!(f, "{}::{}: ", stringify!($enum_name), stringify!($field_type))?;
-                       error.fmt(f)
-                   })*
+        impl fmt::Display for $enum_name {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                match self {
+                    $($enum_name::$field_type ( error ) => {
+                        write!(f, "{}::{}: ", stringify!($enum_name), stringify!($field_type))?;
+                        error.fmt(f)
+                    })*
+                }
+            }
+        }
 
-               }
+        $(
+        impl From<$enc_type> for $enum_name {
+           fn from(err: $enc_type) -> Self {
+               $enum_name::$field_type(err)
            }
-       }
+        }
+        )*
 
-       $(
-       impl From<$enc_type> for $enum_name {
-          fn from(err: $enc_type) -> Self {
-              $enum_name::$field_type(err)
-          }
-       }
-       )*
-
-       impl std::error::Error for $enum_name {}
+        impl std::error::Error for $enum_name {}
     }
 }
 
