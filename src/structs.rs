@@ -7,6 +7,8 @@ use flate2::write::{DeflateDecoder, DeflateEncoder};
 use flate2::Compression;
 use futures::executor::block_on;
 use generic_array::GenericArray;
+use hash_roll::{fastcdc, gear_table::GEAR_64, ChunkIncr};
+use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
@@ -32,26 +34,65 @@ type RefCount = usize;
 pub trait Hashable: Serialize {
     fn hash(&self) -> Result<blake3::Hash> {
         let serialized = bincode::serialize(self)?;
-        Ok(blake3::hash(&serialized))
+        serialized.hash()
     }
 
     fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
         let serialized = bincode::serialize(self)?;
-        Ok(blake3::keyed_hash(&key.as_array(), &serialized))
+        serialized.keyed_hash(key)
+    }
+}
+
+impl Hashable for Vec<u8> {
+    fn hash(&self) -> Result<blake3::Hash> {
+        Ok(blake3::hash(self))
+    }
+
+    fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
+        Ok(blake3::keyed_hash(&key.as_array(), self))
     }
 }
 
 pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
     /// Generic function to encrypt data in backrub
     fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
+        // convert data to Vec<u8>
+        let serialized_data = bincode::serialize(self)?;
+        serialized_data.encrypt(key)
+    }
+
+    /// Generic function to decrypt data encrypted by backrub
+    fn decrypt(data: &[u8], key: &EncKey) -> Result<Self> {
+        // decrypt the data
+        let data = Vec::<u8>::decrypt(data, key)?;
+        // convert decrypted data to the target data type
+        Ok(bincode::deserialize(&data)?)
+    }
+
+    /// Generic function to compress and encrypt data in backrub
+    fn compress_and_encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
+        // convert data to Vec<u8>
+        let serialized_data = bincode::serialize(self)?;
+        serialized_data.compress_and_encrypt(key)
+    }
+
+    /// Generic function to decrypt and uncompress data encrypted by backrub
+    fn decrypt_and_uncompress(data: &[u8], key: &EncKey) -> Result<Self> {
+        // decrypt and decompress the data
+        let data = Vec::<u8>::decrypt_and_uncompress(data, key)?;
+        // deserialize uncompressed, decrypted data
+        Ok(bincode::deserialize(&data)?)
+    }
+}
+
+impl Encrypt for Vec<u8> {
+    fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
         // generate nonce
         let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // convert data to Vec<u8>
-        let serialized_data = bincode::serialize(self)?;
         // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &serialized_data[..])?;
+        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &self[..])?;
         // construct CryptoCtx using the nonce and the encrypted data
         let ctx = CryptoCtx {
             nonce,
@@ -61,30 +102,24 @@ pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
         Ok(bincode::serialize(&ctx)?)
     }
 
-    /// Generic function to decrypt data encrypted by backrub
     fn decrypt(data: &[u8], key: &EncKey) -> Result<Self> {
         // decode encrypted data to split nonce and encrypted data
         let ctx = bincode::deserialize::<CryptoCtx>(data)?;
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(&key.as_array().into());
         // decrypt the data
-        let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
-        // convert decrypted data to the target data type
-        Ok(bincode::deserialize(&decrypted_data)?)
+        Ok(cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?)
     }
 
-    /// Generic function to compress and encrypt data in backrub
     fn compress_and_encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
         // generate nonce
         let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         // setup the cipher
         let cipher = XChaCha20Poly1305::new(&key.as_array().into());
-        // convert data to Vec<u8>
-        let serialized_data = bincode::serialize(self)?;
 
         // compress the data
         let mut compressor = DeflateEncoder::new(Vec::new(), Compression::default());
-        compressor.write_all(&serialized_data[..])?;
+        compressor.write_all(&self[..])?;
         let compressed_data = compressor.finish()?;
         // encrypt the data
         let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &compressed_data[..])?;
@@ -97,7 +132,6 @@ pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
         Ok(bincode::serialize(&ctx)?)
     }
 
-    /// Generic function to decrypt and uncompress data encrypted by backrub
     fn decrypt_and_uncompress(data: &[u8], key: &EncKey) -> Result<Self> {
         // decode encrypted data to split nonce and encrypted data
         let ctx = bincode::deserialize::<CryptoCtx>(data)?;
@@ -106,12 +140,10 @@ pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
         // decrypt the data
         let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
         // decompress decrypted data
-        let mut uncompressed_data = Vec::new();
+        let uncompressed_data = Vec::new();
         let mut deflater = DeflateDecoder::new(uncompressed_data);
         deflater.write_all(&decrypted_data)?;
-        uncompressed_data = deflater.finish()?;
-        // deserialize uncompressed data
-        Ok(bincode::deserialize(&uncompressed_data)?)
+        Ok(deflater.finish()?)
     }
 }
 
@@ -547,6 +579,25 @@ impl BackupManager {
     }
 }
 
+fn chunk(filename: PathBuf, conf: ChunkerConf) -> Result<Vec<Vec<u8>>> {
+    let file = fs::File::open(filename)?;
+
+    let cdc = fastcdc::FastCdc::new(
+        &GEAR_64,
+        conf.minimum_chunk_size,
+        conf.average_chunk_size,
+        conf.maximum_chunk_size,
+    );
+    let chunk_iter = fastcdc::FastCdcIncr::from(&cdc);
+    let mmap = unsafe { Mmap::map(&file)? };
+
+    let chunks: Vec<Vec<u8>> = chunk_iter
+        .iter_slices(&mmap[..])
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    Ok(chunks)
+}
 /*
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeConf {
@@ -571,9 +622,9 @@ pub struct Metadata {
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkerConf {
-    minimum_chunk_size: usize,
-    average_chunk_size: usize,
-    maximum_chunk_size: usize,
+    minimum_chunk_size: u64,
+    average_chunk_size: u64,
+    maximum_chunk_size: u64,
 }
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
