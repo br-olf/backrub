@@ -44,12 +44,34 @@ pub trait Hashable: Serialize {
 }
 
 impl Hashable for Vec<u8> {
+    /// This will never return Err
     fn hash(&self) -> Result<blake3::Hash> {
-        Ok(blake3::hash(self))
+        let mut hasher = blake3::Hasher::new();
+        hasher.update_rayon(&self);
+        Ok(hasher.finalize())
     }
 
+    /// This will never return Err
     fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
-        Ok(blake3::keyed_hash(&key.as_array(), self))
+        let mut hasher = blake3::Hasher::new_keyed(key.as_array());
+        hasher.update_rayon(&self);
+        Ok(hasher.finalize())
+    }
+}
+
+impl Hashable for &[u8] {
+    /// This will never return Err
+    fn hash(&self) -> Result<blake3::Hash> {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update_rayon(&self);
+        Ok(hasher.finalize())
+    }
+
+    /// This will never return Err
+    fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
+        let mut hasher = blake3::Hasher::new_keyed(key.as_array());
+        hasher.update_rayon(&self);
+        Ok(hasher.finalize())
     }
 }
 
@@ -90,9 +112,9 @@ impl Encrypt for Vec<u8> {
         // generate nonce
         let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+        let cipher = XChaCha20Poly1305::new(key.as_array().into());
         // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &self[..])?;
+        let encrypted_data = cipher.encrypt(nonce.as_array().into(), &self[..])?;
         // construct CryptoCtx using the nonce and the encrypted data
         let ctx = CryptoCtx {
             nonce,
@@ -106,23 +128,23 @@ impl Encrypt for Vec<u8> {
         // decode encrypted data to split nonce and encrypted data
         let ctx = bincode::deserialize::<CryptoCtx>(data)?;
         // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+        let cipher = XChaCha20Poly1305::new(key.as_array().into());
         // decrypt the data
-        Ok(cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?)
+        Ok(cipher.decrypt(ctx.nonce.as_array().into(), &ctx.data[..])?)
     }
 
     fn compress_and_encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {
         // generate nonce
         let nonce: EncNonce = XChaCha20Poly1305::generate_nonce(&mut OsRng).into();
         // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+        let cipher = XChaCha20Poly1305::new(key.as_array().into());
 
         // compress the data
         let mut compressor = DeflateEncoder::new(Vec::new(), Compression::default());
         compressor.write_all(&self[..])?;
         let compressed_data = compressor.finish()?;
         // encrypt the data
-        let encrypted_data = cipher.encrypt(&nonce.as_array().into(), &compressed_data[..])?;
+        let encrypted_data = cipher.encrypt(nonce.as_array().into(), &compressed_data[..])?;
         // construct CryptoCtx using the nonce and the encrypted data
         let ctx = CryptoCtx {
             nonce,
@@ -136,9 +158,9 @@ impl Encrypt for Vec<u8> {
         // decode encrypted data to split nonce and encrypted data
         let ctx = bincode::deserialize::<CryptoCtx>(data)?;
         // setup the cipher
-        let cipher = XChaCha20Poly1305::new(&key.as_array().into());
+        let cipher = XChaCha20Poly1305::new(key.as_array().into());
         // decrypt the data
-        let decrypted_data = cipher.decrypt(&ctx.nonce.as_array().into(), &ctx.data[..])?;
+        let decrypted_data = cipher.decrypt(ctx.nonce.as_array().into(), &ctx.data[..])?;
         // decompress decrypted data
         let uncompressed_data = Vec::new();
         let mut deflater = DeflateDecoder::new(uncompressed_data);
@@ -223,8 +245,8 @@ impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B
 }
 
 impl EncKey {
-    pub fn as_array(&self) -> [u8; KEY_SIZE] {
-        self.0
+    pub fn as_array(&self) -> &[u8; KEY_SIZE] {
+        &self.0
     }
 
     pub fn xor_keys(&self, key: &EncKey) -> EncKey {
@@ -279,8 +301,8 @@ impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B
 }
 
 impl EncNonce {
-    pub fn as_array(&self) -> [u8; NONCE_SIZE] {
-        self.0
+    pub fn as_array(&self) -> &[u8; NONCE_SIZE] {
+        &self.0
     }
 }
 
@@ -325,8 +347,8 @@ impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B
 }
 
 impl SigKey {
-    pub fn as_array(&self) -> [u8; KEY_SIZE] {
-        self.0
+    pub fn as_array(&self) -> &[u8; KEY_SIZE] {
+        &self.0
     }
 }
 
@@ -574,14 +596,9 @@ impl BackupManager {
         todo!()
     }
 
-    async fn bla(&mut self) -> () {
-        todo!()
-    }
 }
 
-fn chunk(filename: PathBuf, conf: ChunkerConf) -> Result<Vec<Vec<u8>>> {
-    let file = fs::File::open(filename)?;
-
+pub fn chunk_and_hash(mmap: &Mmap, conf: &ChunkerConf, chunk_hash_key: &EncKey, file_hash_key: &EncKey) -> Result<(Vec<(Vec<u8>, blake3::Hash)>, blake3::Hash)> {
     let cdc = fastcdc::FastCdc::new(
         &GEAR_64,
         conf.minimum_chunk_size,
@@ -589,14 +606,14 @@ fn chunk(filename: PathBuf, conf: ChunkerConf) -> Result<Vec<Vec<u8>>> {
         conf.maximum_chunk_size,
     );
     let chunk_iter = fastcdc::FastCdcIncr::from(&cdc);
-    let mmap = unsafe { Mmap::map(&file)? };
 
-    let chunks: Vec<Vec<u8>> = chunk_iter
+    let chunks: Vec<(Vec<u8>, blake3::Hash)> = chunk_iter
         .iter_slices(&mmap[..])
-        .map(|chunk| chunk.to_vec())
+        .map(|chunk| (chunk.to_vec(), chunk.keyed_hash(chunk_hash_key).unwrap()))
         .collect();
 
-    Ok(chunks)
+
+    Ok((chunks, (&mmap[..]).keyed_hash(file_hash_key)?))
 }
 /*
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -867,13 +884,11 @@ pub fn log2u64(x: u64) -> Option<u64> {
 }
 
 #[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct FilePathGen(u64);
-impl FilePathGen {
-    pub fn new() -> FilePathGen {
-        FilePathGen::default()
-    }
-    pub fn from_U64(n: u64) -> FilePathGen {
-        FilePathGen { 0: n }
+pub struct FilePathGen(u64);
+
+impl From<u64> for FilePathGen{
+    fn from(value: u64) -> Self {
+        FilePathGen{ 0: value }
     }
 }
 
@@ -1258,7 +1273,7 @@ struct InodeDbEntry {
 impl Encrypt for InodeDbEntry {}
 
 #[derive(Debug)]
-struct InodeDb {
+pub struct InodeDb {
     tree: sled::Tree,
     inode_enc_key: EncKey,
     inode_hash_key: EncKey,
