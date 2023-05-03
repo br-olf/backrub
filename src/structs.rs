@@ -44,6 +44,7 @@ pub trait Hashable: Serialize {
 }
 
 impl Hashable for Vec<u8> {
+
     /// This will never return Err
     fn hash(&self) -> Result<blake3::Hash> {
         let mut hasher = blake3::Hasher::new();
@@ -402,7 +403,7 @@ pub struct BackupManagerConf {
 }
 
 impl Default for BackupManagerConf {
-    /// **Panics if current directory is invalid**
+    /// **Panics if current working directory is invalid**
     fn default() -> Self {
         let _pwd = env::current_dir().expect("current working directoy could not be determinated");
 
@@ -446,6 +447,7 @@ pub struct BackupManager {
     manifest: Manifest,
     keys: CryptoKeys,
     sig_key: EncKey,
+    database: sled::Db,
 }
 
 impl BackupManager {
@@ -500,6 +502,7 @@ impl BackupManager {
             manifest,
             keys,
             sig_key,
+            database: db,
         };
 
         Ok(manager)
@@ -561,6 +564,7 @@ impl BackupManager {
             manifest,
             keys,
             sig_key,
+            database: db,
         };
 
         // write Manifest
@@ -592,8 +596,20 @@ impl BackupManager {
         Ok(())
     }
 
-    fn create_backup(name: &str, path: &Path, conf: &BackupConf) -> Result<()> {
-        todo!()
+    /// Cerates a new backup
+    pub fn create_backup(&mut self, name: &str, path: &Path, conf: &BackupConf) -> Result<()> {
+        if !path.is_dir() {
+            return Err(BackrubError::BackupRootMustBeDir(path.to_path_buf()).into());
+        }
+
+        self.backup_dir(path, conf);
+
+        todo!("create backup db entry")
+    }
+
+    /// performs all backup operations for a directory
+    fn backup_dir(&mut self, path: &Path, conf: &BackupConf){
+
     }
 
 }
@@ -609,7 +625,7 @@ pub fn chunk_and_hash(mmap: &Mmap, conf: &ChunkerConf, chunk_hash_key: &EncKey, 
 
     let chunks: Vec<(Vec<u8>, blake3::Hash)> = chunk_iter
         .iter_slices(&mmap[..])
-        .map(|chunk| (chunk.to_vec(), chunk.keyed_hash(chunk_hash_key).unwrap()))
+        .map(|chunk| (chunk.to_vec(), chunk.keyed_hash(chunk_hash_key).expect("never fail")))
         .collect();
 
 
@@ -946,6 +962,7 @@ pub enum BackrubError {
     SledDbDidNotExist(PathBuf),
     SelfTestError,
     InvalidSignature,
+    BackupRootMustBeDir(PathBuf),
 }
 
 impl fmt::Display for BackrubError {
@@ -955,6 +972,13 @@ impl fmt::Display for BackrubError {
                 write!(
                     f,
                     "InvalidSignature: a signature is invalid, this could be a sign of tampering"
+                )
+            }
+            BackrubError::BackupRootMustBeDir(path) => {
+                write!(
+                    f,
+                    "BackupRootMustBeDir: the root of any backup must be a directory, got \"{}\"",
+                    path.display()
                 )
             }
             BackrubError::SledDbAlreadyExists(path) => {
