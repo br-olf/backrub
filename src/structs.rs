@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::prelude::*;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use typenum::{
     bit::{B0, B1},
@@ -44,7 +45,6 @@ pub trait Hashable: Serialize {
 }
 
 impl Hashable for Vec<u8> {
-
     /// This will never return Err
     fn hash(&self) -> Result<blake3::Hash> {
         let mut hasher = blake3::Hasher::new();
@@ -167,6 +167,36 @@ impl Encrypt for Vec<u8> {
         let mut deflater = DeflateDecoder::new(uncompressed_data);
         deflater.write_all(&decrypted_data)?;
         Ok(deflater.finish()?)
+    }
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub struct Hash([u8; HASH_SIZE]);
+
+impl From<[u8; HASH_SIZE]> for Hash {
+    fn from(array: [u8; HASH_SIZE]) -> Self {
+        Hash(array)
+    }
+}
+
+impl TryFrom<&[u8]> for Hash {
+    type Error = std::array::TryFromSliceError;
+    fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
+        Ok(Hash(<[u8; HASH_SIZE]>::try_from(array)?))
+    }
+}
+
+impl AsMut<[u8]> for Hash {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
+impl AsRef<[u8]> for Hash {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -608,13 +638,15 @@ impl BackupManager {
     }
 
     /// performs all backup operations for a directory
-    fn backup_dir(&mut self, path: &Path, conf: &BackupConf){
-
-    }
-
+    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) {}
 }
 
-pub fn chunk_and_hash(mmap: &Mmap, conf: &ChunkerConf, chunk_hash_key: &EncKey, file_hash_key: &EncKey) -> Result<(Vec<(Vec<u8>, blake3::Hash)>, blake3::Hash)> {
+pub fn chunk_and_hash(
+    mmap: &Mmap,
+    conf: &ChunkerConf,
+    chunk_hash_key: &EncKey,
+    file_hash_key: &EncKey,
+) -> Result<(Vec<(Vec<u8>, blake3::Hash)>, blake3::Hash)> {
     let cdc = fastcdc::FastCdc::new(
         &GEAR_64,
         conf.minimum_chunk_size,
@@ -625,9 +657,13 @@ pub fn chunk_and_hash(mmap: &Mmap, conf: &ChunkerConf, chunk_hash_key: &EncKey, 
 
     let chunks: Vec<(Vec<u8>, blake3::Hash)> = chunk_iter
         .iter_slices(&mmap[..])
-        .map(|chunk| (chunk.to_vec(), chunk.keyed_hash(chunk_hash_key).expect("never fail")))
+        .map(|chunk| {
+            (
+                chunk.to_vec(),
+                chunk.keyed_hash(chunk_hash_key).expect("never fail"),
+            )
+        })
         .collect();
-
 
     Ok((chunks, (&mmap[..]).keyed_hash(file_hash_key)?))
 }
@@ -902,9 +938,9 @@ pub fn log2u64(x: u64) -> Option<u64> {
 #[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FilePathGen(u64);
 
-impl From<u64> for FilePathGen{
+impl From<u64> for FilePathGen {
     fn from(value: u64) -> Self {
-        FilePathGen{ 0: value }
+        FilePathGen { 0: value }
     }
 }
 
@@ -1285,6 +1321,192 @@ impl ChunkDb {
             None => Ok(None),
             Some((_ref_count, file_name)) => Ok(Some(file_name)),
         }
+    }
+}
+
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct RcDbEntry<T> {
+    data: T,
+    ref_count: RefCount,
+}
+
+impl<T: Serialize + for<'a> Deserialize<'a>> Encrypt for RcDbEntry<T> {}
+
+impl<T: Hashable> Hashable for RcDbEntry<T> {
+    fn hash(&self) -> Result<blake3::Hash> {
+        self.data.hash()
+    }
+    fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
+        self.data.keyed_hash(key)
+    }
+}
+
+/// Generic encrypted reference countig database with [sled] backend
+#[derive(Debug)]
+pub struct RcDb<T: Hashable + Serialize + for<'a> Deserialize<'a>> {
+    tree: sled::Tree,
+    data_enc_key: EncKey,
+    data_hash_key: EncKey,
+    entry_type: PhantomData<T>,
+}
+
+impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
+    /// Database self test
+    ///
+    /// This performs a complete table scan checking all keys and integrity of all data
+    pub fn self_test(&self) -> Result<()> {
+        for data in self.tree.iter() {
+            let (key, encrypted_data) = data?;
+
+            // Check Key
+            if key.len() != HASH_SIZE {
+                return Err(BackrubError::SledKeyLengthError.into());
+            }
+            let key: Hash = key
+                .chunks_exact(HASH_SIZE)
+                .next()
+                .map_or_else(
+                    || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
+                    Ok,
+                )?
+                .try_into()?;
+
+            // Check data
+            let entry = RcDbEntry::<T>::decrypt(&encrypted_data, &self.data_enc_key)?;
+            if key != Hash::from(*entry.data.keyed_hash(&self.data_hash_key)?.as_bytes()) {
+                return Err(BackrubError::SelfTestError.into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Creates a new reference counting database from a `sled::Tree` and running a self test
+    pub fn new(tree: sled::Tree, data_enc_key: EncKey, data_hash_key: EncKey) -> Result<RcDb<T>> {
+        let db = RcDb {
+            tree,
+            data_enc_key,
+            data_hash_key,
+            entry_type: PhantomData,
+        };
+        db.self_test()?;
+        Ok(db)
+    }
+
+    /// Returns the number of stored objects in the database
+    ///
+    /// **This performs an O(n) scan**
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
+    /// Inserts data into the database
+    /// If the same data is already stored the reference count is incremented
+    pub fn insert(&mut self, data: T) -> Result<(RefCount, Hash)> {
+        let key = Hash::from(*data.keyed_hash(&self.data_hash_key)?.as_bytes());
+        match self.tree.remove(key)? {
+            Some(old) => {
+                let old = RcDbEntry::<T>::decrypt(&old, &self.data_enc_key)?;
+                let ref_count = old.ref_count + 1;
+
+                self.tree.insert(
+                    key,
+                    RcDbEntry { data, ref_count }.encrypt(&self.data_enc_key)?,
+                )?;
+
+                Ok((ref_count, key))
+            }
+            None => {
+                let encrypted_entry =
+                    RcDbEntry { data, ref_count: 1 }.encrypt(&self.data_enc_key)?;
+                self.tree.insert(key, encrypted_entry)?;
+                Ok((1, key))
+            }
+        }
+    }
+
+    /// Removes an instace of the referenced data from the database.
+    /// If the reference count reaches 0 the element will be deleted.
+    pub fn remove(&mut self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+        match self.tree.remove(key)? {
+            None => Ok(None),
+            Some(old) => {
+                let old = RcDbEntry::decrypt(&old, &self.data_enc_key)?;
+                if old.ref_count <= 1 {
+                    Ok(Some((0, old.data)))
+                } else {
+                    let ref_count = old.ref_count - 1;
+
+                    let encrypted_entry = RcDbEntry {
+                        data: old.data.clone(),
+                        ref_count,
+                    }
+                    .encrypt(&self.data_enc_key)?;
+                    self.tree.insert(key, encrypted_entry)?;
+                    Ok(Some((ref_count, old.data)))
+                }
+            }
+        }
+    }
+
+    /// Deletes the referenced entry from the database regardless of the reference count
+    pub fn purge(&mut self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+        match self.tree.remove(key)? {
+            None => Ok(None),
+            Some(old) => {
+                let old = RcDbEntry::decrypt(&old, &self.data_enc_key)?;
+                Ok(Some((old.ref_count, old.data)))
+            }
+        }
+    }
+
+    /// Gets the current refercence count and data
+    pub fn get_data_db_entry(&self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+        match self.tree.get(key)? {
+            None => Ok(None),
+            Some(encrypted_data) => {
+                let entry = RcDbEntry::decrypt(&encrypted_data, &self.data_enc_key)?;
+                Ok(Some((entry.ref_count, entry.data)))
+            }
+        }
+    }
+
+    /// Gets only the referenced data
+    pub fn get_data(&self, key: &Hash) -> Result<Option<T>> {
+        match self.get_data_db_entry(key)? {
+            None => Ok(None),
+            Some((_ref_count, data)) => Ok(Some(data)),
+        }
+    }
+
+    /// Gets only the reference count
+    pub fn get_ref_count(&self, key: &Hash) -> Result<Option<RefCount>> {
+        match self.get_data_db_entry(key)? {
+            None => Ok(None),
+            Some((ref_count, _data)) => Ok(Some(ref_count)),
+        }
+    }
+
+    /// Returns a complete in memory representation of the database
+    pub fn get_mappings(&self) -> Result<BTreeMap<Hash, (RefCount, T)>> {
+        let mut result = BTreeMap::<Hash, (RefCount, T)>::new();
+        for data in self.tree.iter() {
+            let (key, encrypted_data) = data?;
+            if key.len() != HASH_SIZE {
+                return Err(BackrubError::SledKeyLengthError.into());
+            } else {
+                let hash: Hash = key
+                    .chunks_exact(HASH_SIZE)
+                    .next()
+                    .map_or_else(
+                        || Err::<&[u8], BackrubError>(BackrubError::SledKeyLengthError),
+                        Ok,
+                    )?
+                    .try_into()?;
+                let entry = RcDbEntry::decrypt(&encrypted_data, &self.data_enc_key)?;
+                result.insert(hash, (entry.ref_count, entry.data));
+            }
+        }
+        Ok(result)
     }
 }
 
