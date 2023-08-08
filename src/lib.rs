@@ -17,6 +17,9 @@ pub mod traits;
 /// Backup manager and configuration
 pub mod manager;
 
+/// Databases
+pub mod db;
+
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
 }

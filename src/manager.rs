@@ -16,6 +16,7 @@ use futures::executor::block_on;
 
 use super::error::*;
 use super::traits::*;
+use super::db::*;
 use super::structs::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
