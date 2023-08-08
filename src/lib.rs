@@ -20,6 +20,10 @@ pub mod manager;
 /// Databases
 pub mod db;
 
+/// Tests
+#[cfg(test)]
+mod test;
+
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
 }

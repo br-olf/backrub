@@ -1,23 +1,18 @@
-
 use std::{
-    env,
-    fs,
-    path::{Path, PathBuf},
+    env, fs,
     io::prelude::*,
+    path::{Path, PathBuf},
 };
 
+use async_std::{fs::File, sync::Mutex};
 use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
-use serde::{Deserialize, Serialize};
-use async_std::{
-    sync::Mutex,
-    fs::File};
 use futures::executor::block_on;
+use serde::{Deserialize, Serialize};
 
-
-use super::error::*;
-use super::traits::*;
 use super::db::*;
+use super::error::*;
 use super::structs::*;
+use super::traits::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackupManagerConf {

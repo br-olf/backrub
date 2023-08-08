@@ -1,14 +1,9 @@
-use std::{
-    path::PathBuf,
-    marker::PhantomData,
-    collections::BTreeMap,
-};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, marker::PhantomData, path::PathBuf};
 
-use super::structs::*;
 use super::error::*;
+use super::structs::*;
 use super::traits::*;
-
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkDbState {
