@@ -3,9 +3,10 @@ pub use std;
 
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::{error, fmt, fs, io, path};
+use std::{error as std_error, fmt, fs, io, path};
 use walkdir::WalkDir;
 pub mod structs;
+pub mod error;
 
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
@@ -241,7 +242,7 @@ impl DedupTree {
 #[derive(Debug, Default)]
 pub struct MultipleIoErrors(Vec<(path::PathBuf, io::Error)>);
 
-impl error::Error for MultipleIoErrors {}
+impl std_error::Error for MultipleIoErrors {}
 
 impl fmt::Display for MultipleIoErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
