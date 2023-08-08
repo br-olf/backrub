@@ -1,12 +1,12 @@
 #[doc(inline)]
 pub use std;
 
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::{error as std_error, fmt, fs, io, path};
 use walkdir::WalkDir;
-pub mod structs;
 pub mod error;
+pub mod structs;
+pub mod traits;
 
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
     unsafe { std::mem::transmute::<&[u8; 32], &[u64; 4]>(input) }
