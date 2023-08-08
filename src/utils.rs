@@ -2,8 +2,8 @@ use hash_roll::{fastcdc, gear_table::GEAR_64, ChunkIncr};
 use memmap::Mmap;
 
 use super::error::*;
-use super::traits::*;
 use super::structs::*;
+use super::traits::*;
 
 /// Calculates the $log_2$ on an u64
 pub fn log2u64(x: u64) -> Option<u64> {
@@ -13,7 +13,6 @@ pub fn log2u64(x: u64) -> Option<u64> {
         None
     }
 }
-
 
 /// Calculate chunks, chunk hashes and a file-hash of mmaped data.
 /// Returns a Vec of `(Chunk, ChunkHash)` tuples and the FileHash.

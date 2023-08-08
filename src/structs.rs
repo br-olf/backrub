@@ -1,7 +1,5 @@
 use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
 use generic_array::GenericArray;
-use hash_roll::{fastcdc, gear_table::GEAR_64, ChunkIncr};
-use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use typenum::{
@@ -10,9 +8,9 @@ use typenum::{
 };
 
 use super::db::*;
-use super::utils::*;
 use super::error::*;
 use super::traits::*;
+use super::utils::*;
 
 pub const SALT_SIZE: usize = 32;
 pub const HASH_SIZE: usize = 32;
@@ -537,7 +535,6 @@ pub struct Chunk {
 
 impl Encrypt for Chunk {}
 impl Hashable for Chunk {}
-
 
 #[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FilePathGen(pub(crate) u64);
