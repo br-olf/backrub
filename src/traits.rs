@@ -1,5 +1,3 @@
-use super::error::*;
-use super::structs::*;
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305,
@@ -9,18 +7,36 @@ use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::io::prelude::*;
 
+use super::error::*;
+use super::structs::*;
+
 #[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CryptoCtx {
+struct CryptoCtx {
     nonce: EncNonce,
     data: Vec<u8>,
 }
 
+/// Generic trait for cryptographically hashing all structs that implement Serialize
+///
+/// ```rust
+/// use serde::{Deserialize, Serialize};
+/// use backrub::traits::Hashable;
+///
+/// #[derive(Serialize, Deserialize)]
+/// struct MyStruct {
+///     mydata: Vec<u8>,
+/// }
+///
+/// impl Hashable for MyStruct {}
+/// ```
 pub trait Hashable: Serialize {
+    /// Generic function to calculate a hash in backrub
     fn hash(&self) -> Result<blake3::Hash> {
         let serialized = bincode::serialize(self)?;
         serialized.hash()
     }
 
+    /// Generic function to calculate a keyed hash in backrub
     fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
         let serialized = bincode::serialize(self)?;
         serialized.keyed_hash(key)
@@ -59,6 +75,18 @@ impl Hashable for &[u8] {
     }
 }
 
+/// Generic trait for symmetric encrpytion for all structs that implement Serialize and Deserialize
+/// ```rust
+/// use serde::{Deserialize, Serialize};
+/// use backrub::traits::Encrypt;
+///
+/// #[derive(Serialize, Deserialize)]
+/// struct MyStruct {
+///     mydata: Vec<u8>,
+/// }
+///
+/// impl Encrypt for MyStruct {}
+/// ```
 pub trait Encrypt: Serialize + for<'a> Deserialize<'a> {
     /// Generic function to encrypt data in backrub
     fn encrypt(&self, key: &EncKey) -> Result<Vec<u8>> {

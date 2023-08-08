@@ -19,14 +19,14 @@ use typenum::{
 use super::error::*;
 use super::traits::*;
 
-const SALT_SIZE: usize = 32;
-const HASH_SIZE: usize = 32;
-const KEY_SIZE: usize = 32;
-const NONCE_SIZE: usize = 24;
-const CRYPTO_KEYS_SIZE: usize = KEY_SIZE * 4;
+pub const SALT_SIZE: usize = 32;
+pub const HASH_SIZE: usize = 32;
+pub const KEY_SIZE: usize = 32;
+pub const NONCE_SIZE: usize = 24;
+pub const CRYPTO_KEYS_SIZE: usize = KEY_SIZE * 4;
 
 // Signature key for manifest + encrypted keys for data
-const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
+pub const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
 
 type RefCount = usize;
 
@@ -501,6 +501,8 @@ impl BackupManager {
     fn backup_dir(&mut self, path: &Path, conf: &BackupConf) {}
 }
 
+/// Calculate chunks, chunk hashes and a file-hash of mmaped data.
+/// Returns a Vec of `(Chunk, ChunkHash)` tuples and the FileHash.
 pub fn chunk_and_hash(
     mmap: &Mmap,
     conf: &ChunkerConf,

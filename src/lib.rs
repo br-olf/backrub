@@ -4,8 +4,14 @@ pub use std;
 use std::collections::{BTreeMap, BTreeSet};
 use std::{error as std_error, fmt, fs, io, path};
 use walkdir::WalkDir;
+
+/// Error and Result types
 pub mod error;
+
+/// Basic data structs
 pub mod structs;
+
+/// Traits in backrub
 pub mod traits;
 
 pub fn convert_32u8_to_4u64(input: &[u8; 32]) -> &[u64; 4] {
