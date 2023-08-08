@@ -20,6 +20,9 @@ pub mod manager;
 /// Databases
 pub mod db;
 
+/// Utility functions
+pub mod utils;
+
 /// Tests
 #[cfg(test)]
 mod test;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{db::*, error::*, manager::*, structs::*, traits::*};
+use crate::{db::*, error::*, manager::*, structs::*, traits::*, utils::*};
 use chacha20poly1305::{
     aead::{rand_core::RngCore, Aead, KeyInit, OsRng},
     XChaCha20Poly1305,
