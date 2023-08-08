@@ -283,223 +283,6 @@ impl Default for BackupConf {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct BackupManagerConf {
-    chunk_root_dir: PathBuf,
-    db_path: PathBuf,
-    manifest_path: PathBuf,
-    chunker_conf: ChunkerConf,
-    argon2_conf: Argon2Conf,
-}
-
-impl Default for BackupManagerConf {
-    /// **Panics if current working directory is invalid**
-    fn default() -> Self {
-        let _pwd = env::current_dir().expect("current working directoy could not be determinated");
-
-        let mut chunk_root_dir = _pwd.clone();
-        chunk_root_dir.push("data");
-
-        let mut db_path = _pwd.clone();
-        db_path.push("backrub.db");
-
-        let mut manifest_path = _pwd.clone();
-        manifest_path.push("backrub.manifest");
-
-        let chunker_conf = ChunkerConf {
-            minimum_chunk_size: 4 * 1024 * 1024,
-            average_chunk_size: 16 * 1024 * 1024,
-            maximum_chunk_size: 64 * 1024 * 1024,
-        };
-
-        let argon2_conf = Argon2Conf {
-            threads: 4,
-            mem_cost: 2 * 1024 * 1024 * 1024,
-            time_cost: 2,
-            variant: argon2::Variant::Argon2id.as_u32(),
-            version: argon2::Version::Version13.as_u32(),
-        };
-
-        return BackupManagerConf {
-            chunk_root_dir,
-            db_path,
-            manifest_path,
-            chunker_conf,
-            argon2_conf,
-        };
-    }
-}
-
-#[derive(Debug)]
-pub struct BackupManager {
-    inode_db: Mutex<InodeDb>,
-    chunk_db: Mutex<ChunkDb>,
-    manifest: Manifest,
-    keys: CryptoKeys,
-    sig_key: EncKey,
-    database: sled::Db,
-}
-
-impl BackupManager {
-    pub fn initialize_backup_manager(
-        manifest_path: &Path,
-        password: &str,
-    ) -> Result<BackupManager> {
-        let manifest = fs::read_to_string(manifest_path)?;
-
-        let manifest: SignedManifest = serde_json::from_str(&manifest)?;
-
-        let mut crypto_root = argon2::hash_raw(
-            password.as_bytes(),
-            &manifest.get_salt(),
-            &manifest.get_argon2config()?,
-        )?;
-
-        let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
-        let sig_key = EncKey::try_from(sig_key.as_slice())?;
-
-        let manifest = manifest.verify(&sig_key)?;
-
-        // Only now we are sure that no tapering occured in manifest!
-
-        let key_encryption_keys: Vec<u8> = crypto_root.drain(..CRYPTO_KEYS_SIZE).collect();
-        let key_encryption_keys =
-            <[u8; CRYPTO_KEYS_SIZE]>::try_from(key_encryption_keys.as_slice())?;
-        let key_encryption_keys = KeyEncryptionKeys::from(key_encryption_keys);
-
-        let keys = manifest.keys.decrypt(key_encryption_keys);
-
-        // read database
-        let db: sled::Db = sled::open(manifest.db_path.clone())?;
-        if !db.was_recovered() {
-            return Err(BackrubError::SledDbDidNotExist(manifest.db_path).into());
-        }
-
-        let inode_tree = db.open_tree(b"inodes")?;
-        let chunk_tree = db.open_tree(b"chunks")?;
-
-        let inode_db = InodeDb::new(inode_tree, keys.inode_enc_key, keys.inode_hash_key)?;
-
-        let chunk_db = ChunkDb::restore(
-            chunk_tree,
-            keys.chunk_enc_key,
-            manifest.chunk_db_state.clone(),
-        )?;
-
-        let manager = BackupManager {
-            inode_db: Mutex::new(inode_db),
-            chunk_db: Mutex::new(chunk_db),
-            manifest,
-            keys,
-            sig_key,
-            database: db,
-        };
-
-        Ok(manager)
-    }
-
-    pub fn new(config: BackupManagerConf, password: &str) -> Result<BackupManager> {
-        let mut salt = [0u8; SALT_SIZE];
-        OsRng.fill_bytes(&mut salt);
-
-        let mut crypto_root = argon2::hash_raw(
-            password.as_bytes(),
-            &salt,
-            &config.argon2_conf.as_argon2config()?,
-        )?;
-
-        // Derive signature key
-        let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
-        let sig_key = EncKey::try_from(sig_key.as_slice())?;
-
-        // Derive keys
-        let key_encryption_keys: Vec<u8> = crypto_root.drain(..CRYPTO_KEYS_SIZE).collect();
-        let key_encryption_keys =
-            <[u8; CRYPTO_KEYS_SIZE]>::try_from(key_encryption_keys.as_slice())?;
-        let key_encryption_keys = KeyEncryptionKeys::from(key_encryption_keys);
-
-        let keys = CryptoKeys::new();
-
-        let enc_keys = keys.encrypt(key_encryption_keys);
-
-        // create database
-        let db: sled::Db = sled::open(config.clone().db_path)?;
-        if db.was_recovered() {
-            return Err(BackrubError::SledDbAlreadyExists(config.db_path).into());
-        }
-
-        // setup inode and chunk databases
-        let inode_tree = db.open_tree(b"inodes")?;
-        let chunk_tree = db.open_tree(b"chunks")?;
-
-        let inode_db = InodeDb::new(inode_tree, keys.inode_enc_key, keys.inode_hash_key)?;
-        let chunk_db = ChunkDb::new(chunk_tree, keys.chunk_enc_key)?;
-
-        // create Manifest
-        let manifest = Manifest {
-            salt: salt,
-            chunk_root_dir: config.chunk_root_dir,
-            db_path: config.db_path,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            chunker_conf: config.chunker_conf,
-            keys: enc_keys,
-            argon2_conf: config.argon2_conf,
-            chunk_db_state: chunk_db.state.clone(),
-        };
-
-        // create BackupManager
-        let manager = BackupManager {
-            inode_db: Mutex::new(inode_db),
-            chunk_db: Mutex::new(chunk_db),
-            manifest,
-            keys,
-            sig_key,
-            database: db,
-        };
-
-        // write Manifest
-        manager.write_manifet(config.manifest_path.as_path())?;
-
-        Ok(manager)
-    }
-
-    fn write_manifet(&self, manifest_path: &Path) -> Result<()> {
-        // Lock mutex
-        let chunk_db = block_on(self.chunk_db.lock());
-
-        // copy manifest
-        let mut manifest = self.manifest.clone();
-
-        // update manifest
-        manifest.chunk_db_state = chunk_db.state.clone();
-
-        // sign manifest
-        let signed = manifest.sign(&self.sig_key)?;
-
-        // serialize
-        let manifest_json = serde_json::to_string(&signed)?;
-
-        // write manifest
-        let mut file = fs::File::create(manifest_path)?;
-        file.write_all(manifest_json.as_bytes())?;
-
-        Ok(())
-    }
-
-    /// Cerates a new backup
-    pub fn create_backup(&mut self, name: &str, path: &Path, conf: &BackupConf) -> Result<()> {
-        if !path.is_dir() {
-            return Err(BackrubError::BackupRootMustBeDir(path.to_path_buf()).into());
-        }
-
-        self.backup_dir(path, conf);
-
-        todo!("create backup db entry")
-    }
-
-    /// performs all backup operations for a directory
-    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) {}
-}
 
 /// Calculate chunks, chunk hashes and a file-hash of mmaped data.
 /// Returns a Vec of `(Chunk, ChunkHash)` tuples and the FileHash.
@@ -553,9 +336,9 @@ pub struct Metadata {
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkerConf {
-    minimum_chunk_size: u64,
-    average_chunk_size: u64,
-    maximum_chunk_size: u64,
+    pub minimum_chunk_size: u64,
+    pub average_chunk_size: u64,
+    pub maximum_chunk_size: u64,
 }
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -567,7 +350,7 @@ pub struct EncCryptoKeys {
 }
 
 impl EncCryptoKeys {
-    fn decrypt(&self, keys: KeyEncryptionKeys) -> CryptoKeys {
+    pub fn decrypt(&self, keys: KeyEncryptionKeys) -> CryptoKeys {
         CryptoKeys {
             chunk_hash_key: self.enc_chunk_hash_key.xor_keys(&keys.key_chunk_hash_key),
             chunk_enc_key: self.enc_chunk_enc_key.xor_keys(&keys.key_chunk_enc_key),
@@ -579,10 +362,10 @@ impl EncCryptoKeys {
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyEncryptionKeys {
-    key_chunk_hash_key: EncKey,
-    key_chunk_enc_key: EncKey,
-    key_inode_hash_key: EncKey,
-    key_inode_enc_key: EncKey,
+    pub key_chunk_hash_key: EncKey,
+    pub key_chunk_enc_key: EncKey,
+    pub key_inode_hash_key: EncKey,
+    pub key_inode_enc_key: EncKey,
 }
 
 impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
@@ -610,15 +393,15 @@ impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
 }
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct CryptoKeys {
-    chunk_hash_key: EncKey,
-    chunk_enc_key: EncKey,
-    inode_hash_key: EncKey,
-    inode_enc_key: EncKey,
+pub struct CryptoKeys {
+    pub chunk_hash_key: EncKey,
+    pub chunk_enc_key: EncKey,
+    pub inode_hash_key: EncKey,
+    pub inode_enc_key: EncKey,
 }
 
 impl CryptoKeys {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut keys = [0u8; CRYPTO_KEYS_SIZE];
         OsRng.fill_bytes(&mut keys);
         let mut n = KEY_SIZE;
@@ -644,7 +427,7 @@ impl CryptoKeys {
 }
 
 impl CryptoKeys {
-    fn encrypt(&self, keys: KeyEncryptionKeys) -> EncCryptoKeys {
+    pub fn encrypt(&self, keys: KeyEncryptionKeys) -> EncCryptoKeys {
         EncCryptoKeys {
             enc_chunk_hash_key: self.chunk_hash_key.xor_keys(&keys.key_chunk_hash_key),
             enc_chunk_enc_key: self.chunk_enc_key.xor_keys(&keys.key_chunk_enc_key),
@@ -718,15 +501,15 @@ impl SignedManifest {
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
-    salt: [u8; SALT_SIZE],
-    chunk_root_dir: PathBuf,
-    db_path: PathBuf,
-    version: String,
-    chunker_conf: ChunkerConf,
-    keys: EncCryptoKeys,
+    pub salt: [u8; SALT_SIZE],
+    pub chunk_root_dir: PathBuf,
+    pub db_path: PathBuf,
+    pub version: String,
+    pub chunker_conf: ChunkerConf,
+    pub keys: EncCryptoKeys,
     //completed_backups: BTreeMap<BackupHash,Vec<u8>>,
-    argon2_conf: Argon2Conf,
-    chunk_db_state: ChunkDbState,
+    pub argon2_conf: Argon2Conf,
+    pub chunk_db_state: ChunkDbState,
 }
 
 impl Hashable for Manifest {}
@@ -861,7 +644,7 @@ impl Encrypt for ChunkDbEntry {}
 #[derive(Debug)]
 pub struct ChunkDb {
     chunk_map: sled::Tree,
-    state: ChunkDbState,
+    pub state: ChunkDbState,
     chunk_enc_key: EncKey,
 }
 
