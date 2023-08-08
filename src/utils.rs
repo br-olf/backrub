@@ -5,7 +5,7 @@ use super::error::*;
 use super::structs::*;
 use super::traits::*;
 
-/// Calculates the $log_2$ on an u64
+/// Calculates the log2 on an [u64]
 pub fn log2u64(x: u64) -> Option<u64> {
     if x > 0 {
         Some(std::mem::size_of::<u64>() as u64 * 8u64 - x.leading_zeros() as u64 - 1u64)
@@ -15,7 +15,7 @@ pub fn log2u64(x: u64) -> Option<u64> {
 }
 
 /// Calculate chunks, chunk hashes and a file-hash of mmaped data.
-/// Returns a Vec of `(Chunk, ChunkHash)` tuples and the FileHash.
+/// Returns a [Vec] of `(Chunk, ChunkHash)` tuples and the FileHash.
 pub fn chunk_and_hash(
     mmap: &Mmap,
     conf: &ChunkerConf,

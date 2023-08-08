@@ -23,9 +23,7 @@ pub const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
 
 pub type RefCount = usize;
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct Hash([u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for Hash {
@@ -53,9 +51,7 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct ChunkHash([u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for ChunkHash {
@@ -83,9 +79,7 @@ impl AsRef<[u8]> for ChunkHash {
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct InodeHash([u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for InodeHash {
@@ -113,9 +107,7 @@ impl AsRef<[u8]> for InodeHash {
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct EncKey([u8; KEY_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
@@ -171,9 +163,7 @@ impl AsRef<[u8]> for EncKey {
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct EncNonce([u8; NONCE_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B0>>> for EncNonce {
@@ -215,9 +205,7 @@ impl AsRef<[u8]> for EncNonce {
     }
 }
 
-#[derive(
-    Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct SigKey([u8; KEY_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
@@ -305,7 +293,7 @@ pub struct ChunkerConf {
     pub maximum_chunk_size: u64,
 }
 
-#[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncCryptoKeys {
     enc_chunk_hash_key: EncKey,
     enc_chunk_enc_key: EncKey,
@@ -324,7 +312,7 @@ impl EncCryptoKeys {
     }
 }
 
-#[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyEncryptionKeys {
     pub key_chunk_hash_key: EncKey,
     pub key_chunk_enc_key: EncKey,
@@ -356,7 +344,7 @@ impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
     }
 }
 
-#[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CryptoKeys {
     pub chunk_hash_key: EncKey,
     pub chunk_enc_key: EncKey,
@@ -491,28 +479,28 @@ impl Manifest {
     }
 }
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Backup {
     timestamp: String,
     name: String,
     root: InodeHash,
 }
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Symlink {
     relpath: PathBuf,
     target: PathBuf,
     metadata: Metadata,
 }
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Directory {
     relpath: PathBuf,
     metadata: Metadata,
     contents: Vec<InodeHash>,
 }
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct File {
     relpath: PathBuf,
     chunk_ids: Vec<ChunkHash>,
@@ -528,7 +516,7 @@ pub enum Inode {
 
 impl Hashable for Inode {}
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Chunk {
     pub data: Vec<u8>,
 }

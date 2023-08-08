@@ -10,7 +10,7 @@ use std::io::prelude::*;
 use super::error::*;
 use super::structs::*;
 
-#[derive(Clone, Hash, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct CryptoCtx {
     nonce: EncNonce,
     data: Vec<u8>,
