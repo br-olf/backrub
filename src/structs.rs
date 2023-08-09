@@ -24,7 +24,7 @@ pub const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
 pub type RefCount = usize;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct Hash([u8; HASH_SIZE]);
+pub struct Hash(pub(crate) [u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for Hash {
     fn from(array: [u8; HASH_SIZE]) -> Self {
@@ -52,7 +52,7 @@ impl AsRef<[u8]> for Hash {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct ChunkHash([u8; HASH_SIZE]);
+pub struct ChunkHash(pub(crate) [u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for ChunkHash {
     fn from(array: [u8; HASH_SIZE]) -> Self {
@@ -80,7 +80,7 @@ impl AsRef<[u8]> for ChunkHash {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct InodeHash([u8; HASH_SIZE]);
+pub struct InodeHash(pub(crate) [u8; HASH_SIZE]);
 
 impl From<[u8; HASH_SIZE]> for InodeHash {
     fn from(array: [u8; HASH_SIZE]) -> Self {
@@ -108,7 +108,7 @@ impl AsRef<[u8]> for InodeHash {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct EncKey([u8; KEY_SIZE]);
+pub struct EncKey(pub(crate) [u8; KEY_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
     for EncKey
@@ -164,7 +164,7 @@ impl AsRef<[u8]> for EncKey {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct EncNonce([u8; NONCE_SIZE]);
+pub struct EncNonce(pub(crate) [u8; NONCE_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B0>>> for EncNonce {
     fn from(
@@ -206,7 +206,7 @@ impl AsRef<[u8]> for EncNonce {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct SigKey([u8; KEY_SIZE]);
+pub struct SigKey(pub(crate) [u8; KEY_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
     for SigKey
@@ -277,13 +277,13 @@ pub struct RuntimeConf {
 */
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Metadata {
-    mode: u32,
-    uid: u32,
-    gid: u32,
-    mtime: i64,
-    mtime_ns: i64,
-    ctime: i64,
-    ctime_ns: i64,
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub mtime: i64,
+    pub mtime_ns: i64,
+    pub ctime: i64,
+    pub ctime_ns: i64,
 }
 
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -314,10 +314,10 @@ impl EncCryptoKeys {
 
 #[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyEncryptionKeys {
-    pub key_chunk_hash_key: EncKey,
-    pub key_chunk_enc_key: EncKey,
-    pub key_inode_hash_key: EncKey,
-    pub key_inode_enc_key: EncKey,
+    pub(crate) key_chunk_hash_key: EncKey,
+    pub(crate) key_chunk_enc_key: EncKey,
+    pub(crate) key_inode_hash_key: EncKey,
+    pub(crate) key_inode_enc_key: EncKey,
 }
 
 impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
@@ -346,10 +346,10 @@ impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
 
 #[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CryptoKeys {
-    pub chunk_hash_key: EncKey,
-    pub chunk_enc_key: EncKey,
-    pub inode_hash_key: EncKey,
-    pub inode_enc_key: EncKey,
+    pub(crate) chunk_hash_key: EncKey,
+    pub(crate) chunk_enc_key: EncKey,
+    pub(crate) inode_hash_key: EncKey,
+    pub(crate) inode_enc_key: EncKey,
 }
 
 impl CryptoKeys {
@@ -428,8 +428,8 @@ impl Argon2Conf {
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct SignedManifest {
-    manifest: Manifest,
-    signature: [u8; 32],
+    pub manifest: Manifest,
+    pub signature: [u8; 32],
 }
 
 impl SignedManifest {
@@ -481,30 +481,30 @@ impl Manifest {
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Backup {
-    timestamp: String,
-    name: String,
-    root: InodeHash,
+    pub(crate) timestamp: String,
+    pub(crate) name: String,
+    pub(crate) root: InodeHash,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Symlink {
-    relpath: PathBuf,
-    target: PathBuf,
-    metadata: Metadata,
+    pub relpath: PathBuf,
+    pub target: PathBuf,
+    pub metadata: Metadata,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Directory {
-    relpath: PathBuf,
-    metadata: Metadata,
-    contents: Vec<InodeHash>,
+    pub relpath: PathBuf,
+    pub metadata: Metadata,
+    pub contents: Vec<InodeHash>,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct File {
-    relpath: PathBuf,
-    chunk_ids: Vec<ChunkHash>,
-    metadata: Metadata,
+    pub relpath: PathBuf,
+    pub chunk_ids: Vec<ChunkHash>,
+    pub metadata: Metadata,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]

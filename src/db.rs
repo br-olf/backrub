@@ -24,9 +24,9 @@ impl Encrypt for ChunkDbEntry {}
 /// The backuped chunks are supposed to be encrypted and stored under the filenames provided by this
 #[derive(Debug)]
 pub struct ChunkDb {
-    chunk_map: sled::Tree,
-    pub state: ChunkDbState,
-    chunk_enc_key: EncKey,
+    pub(crate) chunk_map: sled::Tree,
+    pub(crate) state: ChunkDbState,
+    pub(crate) chunk_enc_key: EncKey,
 }
 
 impl ChunkDb {

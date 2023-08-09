@@ -7,10 +7,9 @@ use super::traits::*;
 
 /// Calculates the log2 on an [u64]
 pub fn log2u64(x: u64) -> Option<u64> {
-    if x > 0 {
-        Some(std::mem::size_of::<u64>() as u64 * 8u64 - x.leading_zeros() as u64 - 1u64)
-    } else {
-        None
+    match x {
+        0 => None,
+        _ =>  Some(std::mem::size_of::<u64>() as u64 * 8u64 - x.leading_zeros() as u64 - 1u64)
     }
 }
 
