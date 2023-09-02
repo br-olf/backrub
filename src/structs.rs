@@ -1,7 +1,7 @@
 use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
 use generic_array::GenericArray;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{os::unix::prelude::MetadataExt, path::PathBuf};
 use typenum::{
     bit::{B0, B1},
     uint::{UInt, UTerm},
@@ -286,6 +286,20 @@ pub struct Metadata {
     pub ctime_ns: i64,
 }
 
+impl From<std::fs::Metadata> for Metadata {
+    fn from(value: std::fs::Metadata) -> Self {
+        Metadata {
+            mode: value.mode(),
+            uid: value.uid(),
+            gid: value.gid(),
+            mtime: value.mtime(),
+            mtime_ns: value.mtime_nsec(),
+            ctime: value.ctime(),
+            ctime_ns: value.ctime_nsec(),
+        }
+    }
+}
+
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChunkerConf {
     pub minimum_chunk_size: u64,
@@ -505,6 +519,7 @@ pub struct File {
     pub relpath: PathBuf,
     pub chunk_ids: Vec<ChunkHash>,
     pub metadata: Metadata,
+    pub file_hash: Hash,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]

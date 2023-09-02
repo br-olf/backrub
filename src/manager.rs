@@ -9,10 +9,17 @@ use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
 use futures::executor::block_on;
 use serde::{Deserialize, Serialize};
 
+use crate::utils::chunk_and_hash;
+
 use super::db::*;
 use super::error::*;
 use super::structs::*;
 use super::traits::*;
+use super::*;
+
+const KB: u64 = 1024;
+const MB: u64 = 1024 * KB;
+const GB: u64 = 1024 * MB;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackupManagerConf {
@@ -38,9 +45,9 @@ impl Default for BackupManagerConf {
         manifest_path.push("backrub.manifest");
 
         let chunker_conf = ChunkerConf {
-            minimum_chunk_size: 4 * 1024 * 1024,
-            average_chunk_size: 16 * 1024 * 1024,
-            maximum_chunk_size: 64 * 1024 * 1024,
+            minimum_chunk_size: 4 * MB,
+            average_chunk_size: 16 * MB,
+            maximum_chunk_size: 64 * MB,
         };
 
         let argon2_conf = Argon2Conf {
@@ -229,5 +236,65 @@ impl BackupManager {
     }
 
     /// performs all backup operations for a directory
-    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) {}
+    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) -> Result<Vec<Inode>> {
+        let dir_iter = fs::read_dir(path)?;
+
+        let mut result = Vec::<Inode>::new();
+
+        struct DEntry {
+            path: PathBuf,
+            meta: fs::Metadata,
+        }
+
+        let mut dirs = Vec::<DEntry>::new();
+        let mut files = Vec::<DEntry>::new();
+        let mut slinks = Vec::<DEntry>::new();
+
+        for entry in dir_iter {
+            let entry = entry?;
+            let e_meta = entry.metadata()?;
+            let r_path = entry.path();
+
+            if e_meta.is_dir() {
+                dirs.push(DEntry {
+                    path: r_path,
+                    meta: e_meta,
+                })
+            } else if e_meta.is_file() {
+                files.push(DEntry {
+                    path: r_path,
+                    meta: e_meta,
+                })
+            } else if e_meta.is_symlink() {
+                slinks.push(DEntry {
+                    path: r_path,
+                    meta: e_meta,
+                })
+            }
+        }
+
+        for link in slinks {
+            result.push(Inode::Symlink(Symlink {
+                relpath: link.path.clone(),
+                target: fs::read_link(link.path)?.to_path_buf(),
+                metadata: structs::Metadata::from(link.meta),
+            }));
+        }
+
+        use memmap::Mmap;
+        use std::fs::File;
+
+        for file in files {
+            let f = File::open(file.path).unwrap();
+            let mmap = unsafe { Mmap::map(&f).unwrap() };
+            let res = chunk_and_hash(
+                &mmap,
+                &self.manifest.chunker_conf,
+                &self.keys.chunk_hash_key,
+                &self.keys.inode_hash_key,
+            );
+        }
+
+        todo!()
+    }
 }
