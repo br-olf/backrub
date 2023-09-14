@@ -18,8 +18,8 @@ pub fn log2u64(x: u64) -> Option<u64> {
 pub fn chunk_and_hash(
     mmap: &Mmap,
     conf: &ChunkerConf,
-    chunk_hash_key: &EncKey,
-    file_hash_key: &EncKey,
+    chunk_hash_key: &Key256,
+    file_hash_key: &Key256,
 ) -> Result<(Vec<(Vec<u8>, blake3::Hash)>, blake3::Hash)> {
     let cdc = fastcdc::FastCdc::new(
         &GEAR_64,

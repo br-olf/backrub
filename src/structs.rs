@@ -24,108 +24,54 @@ pub const TOTAL_KEY_SIZE: usize = KEY_SIZE + CRYPTO_KEYS_SIZE;
 pub type RefCount = usize;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct Hash(pub(crate) [u8; HASH_SIZE]);
+pub struct Hash256(pub(crate) [u8; HASH_SIZE]);
 
-impl From<[u8; HASH_SIZE]> for Hash {
+impl From<[u8; HASH_SIZE]> for Hash256 {
     fn from(array: [u8; HASH_SIZE]) -> Self {
-        Hash(array)
+        Hash256(array)
     }
 }
 
-impl TryFrom<&[u8]> for Hash {
+impl TryFrom<&[u8]> for Hash256 {
     type Error = std::array::TryFromSliceError;
     fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(Hash(<[u8; HASH_SIZE]>::try_from(array)?))
+        Ok(Hash256(<[u8; HASH_SIZE]>::try_from(array)?))
     }
 }
 
-impl AsMut<[u8]> for Hash {
+impl AsMut<[u8]> for Hash256 {
     fn as_mut(&mut self) -> &mut [u8] {
         self.0.as_mut()
     }
 }
 
-impl AsRef<[u8]> for Hash {
+impl AsRef<[u8]> for Hash256 {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct ChunkHash(pub(crate) [u8; HASH_SIZE]);
 
-impl From<[u8; HASH_SIZE]> for ChunkHash {
-    fn from(array: [u8; HASH_SIZE]) -> Self {
-        ChunkHash(array)
-    }
-}
-
-impl TryFrom<&[u8]> for ChunkHash {
-    type Error = std::array::TryFromSliceError;
-    fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(ChunkHash(<[u8; HASH_SIZE]>::try_from(array)?))
-    }
-}
-
-impl AsMut<[u8]> for ChunkHash {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl AsRef<[u8]> for ChunkHash {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct InodeHash(pub(crate) [u8; HASH_SIZE]);
-
-impl From<[u8; HASH_SIZE]> for InodeHash {
-    fn from(array: [u8; HASH_SIZE]) -> Self {
-        InodeHash(array)
-    }
-}
-
-impl TryFrom<&[u8]> for InodeHash {
-    type Error = std::array::TryFromSliceError;
-    fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(InodeHash(<[u8; HASH_SIZE]>::try_from(array)?))
-    }
-}
-
-impl AsMut<[u8]> for InodeHash {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl AsRef<[u8]> for InodeHash {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct EncKey(pub(crate) [u8; KEY_SIZE]);
+pub struct Key256(pub(crate) [u8; KEY_SIZE]);
 
 impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
-    for EncKey
+    for Key256
 {
     fn from(
         array: GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>,
     ) -> Self {
-        EncKey(<[u8; KEY_SIZE]>::from(array))
+        Key256(<[u8; KEY_SIZE]>::from(array))
     }
 }
 
-impl EncKey {
+impl Key256 {
     pub fn as_array(&self) -> &[u8; KEY_SIZE] {
         &self.0
     }
 
-    pub fn xor_keys(&self, key: &EncKey) -> EncKey {
+    pub fn xor_keys(&self, key: &Key256) -> Key256 {
         let l = self.as_array();
         let r = key.as_array();
         let l_iter = l.iter();
@@ -134,122 +80,77 @@ impl EncKey {
         let result: [u8; KEY_SIZE] = result
             .try_into()
             .expect("This can never fail because all length match");
-        EncKey::from(result)
+        Key256::from(result)
     }
 }
 
-impl From<[u8; KEY_SIZE]> for EncKey {
+impl From<[u8; KEY_SIZE]> for Key256 {
     fn from(array: [u8; KEY_SIZE]) -> Self {
-        EncKey(array)
+        Key256(array)
     }
 }
 
-impl TryFrom<&[u8]> for EncKey {
+impl TryFrom<&[u8]> for Key256 {
     type Error = std::array::TryFromSliceError;
     fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(EncKey(<[u8; KEY_SIZE]>::try_from(array)?))
+        Ok(Key256(<[u8; KEY_SIZE]>::try_from(array)?))
     }
 }
 
-impl AsMut<[u8]> for EncKey {
+impl AsMut<[u8]> for Key256 {
     fn as_mut(&mut self) -> &mut [u8] {
         self.0.as_mut()
     }
 }
 
-impl AsRef<[u8]> for EncKey {
+impl AsRef<[u8]> for Key256 {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct EncNonce(pub(crate) [u8; NONCE_SIZE]);
+pub struct Nonce192(pub(crate) [u8; NONCE_SIZE]);
 
-impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B0>>> for EncNonce {
+impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B0>>> for Nonce192 {
     fn from(
         array: GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B1>, B0>, B0>, B0>>,
     ) -> Self {
-        EncNonce(<[u8; NONCE_SIZE]>::from(array))
+        Nonce192(<[u8; NONCE_SIZE]>::from(array))
     }
 }
 
-impl EncNonce {
+impl Nonce192 {
     pub fn as_array(&self) -> &[u8; NONCE_SIZE] {
         &self.0
     }
 }
 
-impl From<[u8; NONCE_SIZE]> for EncNonce {
+impl From<[u8; NONCE_SIZE]> for Nonce192 {
     fn from(array: [u8; NONCE_SIZE]) -> Self {
-        EncNonce(array)
+        Nonce192(array)
     }
 }
 
-impl TryFrom<&[u8]> for EncNonce {
+impl TryFrom<&[u8]> for Nonce192 {
     type Error = std::array::TryFromSliceError;
     fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(EncNonce(<[u8; NONCE_SIZE]>::try_from(array)?))
+        Ok(Nonce192(<[u8; NONCE_SIZE]>::try_from(array)?))
     }
 }
 
-impl AsMut<[u8]> for EncNonce {
+impl AsMut<[u8]> for Nonce192 {
     fn as_mut(&mut self) -> &mut [u8] {
         self.0.as_mut()
     }
 }
 
-impl AsRef<[u8]> for EncNonce {
+impl AsRef<[u8]> for Nonce192 {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct SigKey(pub(crate) [u8; KEY_SIZE]);
-
-impl From<GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>>
-    for SigKey
-{
-    fn from(
-        array: GenericArray<u8, UInt<UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>, B0>>,
-    ) -> Self {
-        SigKey(<[u8; KEY_SIZE]>::from(array))
-    }
-}
-
-impl SigKey {
-    pub fn as_array(&self) -> &[u8; KEY_SIZE] {
-        &self.0
-    }
-}
-
-impl From<[u8; KEY_SIZE]> for SigKey {
-    fn from(array: [u8; KEY_SIZE]) -> Self {
-        SigKey(array)
-    }
-}
-
-impl TryFrom<&[u8]> for SigKey {
-    type Error = std::array::TryFromSliceError;
-    fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
-        Ok(SigKey(<[u8; KEY_SIZE]>::try_from(array)?))
-    }
-}
-
-impl AsMut<[u8]> for SigKey {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl AsRef<[u8]> for SigKey {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-//type BackupHash = [u8; HASH_SIZE];
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackupConf {
@@ -268,11 +169,11 @@ impl Default for BackupConf {
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeConf {
     manifest_sig_key: SigKey,
-    chunk_encryption_key: EncKey,
-    chunk_hash_key: EncKey,
-    inode_encryption_key: EncKey,
-    inode_hash_key: EncKey,
-    backup_encryption_key: EncKey,
+    chunk_encryption_key: Key256,
+    chunk_hash_key: Key256,
+    inode_encryption_key: Key256,
+    inode_hash_key: Key256,
+    backup_encryption_key: Key256,
 }
 */
 #[derive(Clone, Hash, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -309,10 +210,10 @@ pub struct ChunkerConf {
 
 #[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncCryptoKeys {
-    enc_chunk_hash_key: EncKey,
-    enc_chunk_enc_key: EncKey,
-    enc_inode_hash_key: EncKey,
-    enc_inode_enc_key: EncKey,
+    enc_chunk_hash_key: Key256,
+    enc_chunk_enc_key: Key256,
+    enc_inode_hash_key: Key256,
+    enc_inode_enc_key: Key256,
 }
 
 impl EncCryptoKeys {
@@ -328,25 +229,25 @@ impl EncCryptoKeys {
 
 #[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyEncryptionKeys {
-    pub(crate) key_chunk_hash_key: EncKey,
-    pub(crate) key_chunk_enc_key: EncKey,
-    pub(crate) key_inode_hash_key: EncKey,
-    pub(crate) key_inode_enc_key: EncKey,
+    pub(crate) key_chunk_hash_key: Key256,
+    pub(crate) key_chunk_enc_key: Key256,
+    pub(crate) key_inode_hash_key: Key256,
+    pub(crate) key_inode_enc_key: Key256,
 }
 
 impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
     fn from(keys: [u8; CRYPTO_KEYS_SIZE]) -> Self {
         let mut n = KEY_SIZE;
-        let key_chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let key_chunk_hash_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let key_chunk_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let key_chunk_enc_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let key_inode_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let key_inode_hash_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let key_inode_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let key_inode_enc_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
 
         KeyEncryptionKeys {
@@ -360,10 +261,10 @@ impl From<[u8; CRYPTO_KEYS_SIZE]> for KeyEncryptionKeys {
 
 #[derive(Clone, Hash, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CryptoKeys {
-    pub(crate) chunk_hash_key: EncKey,
-    pub(crate) chunk_enc_key: EncKey,
-    pub(crate) inode_hash_key: EncKey,
-    pub(crate) inode_enc_key: EncKey,
+    pub(crate) chunk_hash_key: Key256,
+    pub(crate) chunk_enc_key: Key256,
+    pub(crate) inode_hash_key: Key256,
+    pub(crate) inode_enc_key: Key256,
 }
 
 impl CryptoKeys {
@@ -371,16 +272,16 @@ impl CryptoKeys {
         let mut keys = [0u8; CRYPTO_KEYS_SIZE];
         OsRng.fill_bytes(&mut keys);
         let mut n = KEY_SIZE;
-        let chunk_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let chunk_hash_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let chunk_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let chunk_enc_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let inode_hash_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let inode_hash_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
         n += KEY_SIZE;
-        let inode_enc_key = EncKey::try_from(&keys[n - KEY_SIZE..n])
+        let inode_enc_key = Key256::try_from(&keys[n - KEY_SIZE..n])
             .expect("This can not fail because we take care of the correct size here");
 
         CryptoKeys {
@@ -447,7 +348,7 @@ pub struct SignedManifest {
 }
 
 impl SignedManifest {
-    pub fn verify(&self, key: &EncKey) -> Result<Manifest> {
+    pub fn verify(&self, key: &Key256) -> Result<Manifest> {
         let self_ = (*self).clone();
         let verify = *self.manifest.keyed_hash(key)?.as_bytes();
         if verify != self_.signature {
@@ -473,7 +374,7 @@ pub struct Manifest {
     pub version: String,
     pub chunker_conf: ChunkerConf,
     pub keys: EncCryptoKeys,
-    //completed_backups: BTreeMap<BackupHash,Vec<u8>>,
+    //completed_backups: BTreeMap<BackupHash256,Vec<u8>>,
     pub argon2_conf: Argon2Conf,
     pub chunk_db_state: ChunkDbState,
 }
@@ -483,7 +384,7 @@ impl Hashable for Manifest {}
 impl Manifest {
     //        pub fn new()
 
-    pub fn sign(&self, key: &EncKey) -> Result<SignedManifest> {
+    pub fn sign(&self, key: &Key256) -> Result<SignedManifest> {
         let manifest = (*self).clone();
         let signature = *self.keyed_hash(key)?.as_bytes();
         Ok(SignedManifest {
@@ -497,7 +398,7 @@ impl Manifest {
 pub struct Backup {
     pub(crate) timestamp: String,
     pub(crate) name: String,
-    pub(crate) root: InodeHash,
+    pub(crate) root: Hash256,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -511,15 +412,15 @@ pub struct Symlink {
 pub struct Directory {
     pub relpath: PathBuf,
     pub metadata: Metadata,
-    pub contents: Vec<InodeHash>,
+    pub contents: Vec<Hash256>,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct File {
     pub relpath: PathBuf,
-    pub chunk_ids: Vec<ChunkHash>,
+    pub chunk_ids: Vec<Hash256>,
     pub metadata: Metadata,
-    pub file_hash: Hash,
+    pub file_hash: Hash256,
 }
 
 #[derive(Clone, Hash, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -26,7 +26,7 @@ impl Encrypt for ChunkDbEntry {}
 pub struct ChunkDb {
     pub(crate) chunk_map: sled::Tree,
     pub(crate) state: ChunkDbState,
-    pub(crate) chunk_enc_key: EncKey,
+    pub(crate) chunk_enc_key: Key256,
 }
 
 impl ChunkDb {
@@ -40,7 +40,7 @@ impl ChunkDb {
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             }
-            let _: ChunkHash = key
+            let _: Hash256 = key
                 .chunks_exact(HASH_SIZE)
                 .next()
                 .map_or_else(
@@ -59,7 +59,7 @@ impl ChunkDb {
     /// Returns an [`Error`] when the [`Self::self_test()`] fails
     pub fn restore(
         tree: sled::Tree,
-        chunk_enc_key: EncKey,
+        chunk_enc_key: Key256,
         state: ChunkDbState,
     ) -> Result<ChunkDb> {
         let cs = ChunkDb {
@@ -74,7 +74,7 @@ impl ChunkDb {
     /// Creates a new **empty** ChunkDb
     ///
     /// Returns [`BackrubError::SledTreeNotEmpty`] if provided tree is not empty
-    pub fn new(tree: sled::Tree, chunk_enc_key: EncKey) -> Result<ChunkDb> {
+    pub fn new(tree: sled::Tree, chunk_enc_key: Key256) -> Result<ChunkDb> {
         if tree.len() != 0 {
             return Err(BackrubError::SledTreeNotEmpty.into());
         }
@@ -89,8 +89,8 @@ impl ChunkDb {
         Ok(cs)
     }
 
-    /// Inserts a new [`ChunkHash`] into the database and returns a tuple [`(RefCount, PathBuf)`] of the reference count and the file name the chunk should be stored in
-    pub fn insert(&mut self, key: &ChunkHash) -> Result<(RefCount, PathBuf)> {
+    /// Inserts a new [`Hash256`] into the database and returns a tuple [`(RefCount, PathBuf)`] of the reference count and the file name the chunk should be stored in
+    pub fn insert(&mut self, key: &Hash256) -> Result<(RefCount, PathBuf)> {
         match self.chunk_map.remove(key)? {
             None => {
                 let file_name = self.state.unused_paths
@@ -134,7 +134,7 @@ impl ChunkDb {
     ///
     /// - Returns `Ok(None)` if chunk was not referenced (no file name is associated with that chunk hash)
     /// - Returns `Ok((0, <file_name>))` if the last reference to this chunk was removed indicating that the chunk file should be removed
-    pub fn remove(&mut self, key: &ChunkHash) -> Result<Option<(RefCount, PathBuf)>> {
+    pub fn remove(&mut self, key: &Hash256) -> Result<Option<(RefCount, PathBuf)>> {
         match self.chunk_map.remove(key)? {
             None => Ok(None),
             Some(old) => {
@@ -169,14 +169,14 @@ impl ChunkDb {
     /// Returns a BTreeMap containing the contens of the internal mappings.
     ///
     /// This decrypts all contens creates a compleatly new map in memory
-    pub fn get_mappings(&self) -> Result<BTreeMap<ChunkHash, (RefCount, PathBuf)>> {
-        let mut result = BTreeMap::<ChunkHash, (RefCount, PathBuf)>::new();
+    pub fn get_mappings(&self) -> Result<BTreeMap<Hash256, (RefCount, PathBuf)>> {
+        let mut result = BTreeMap::<Hash256, (RefCount, PathBuf)>::new();
         for data in self.chunk_map.iter() {
             let (key, encrypted_data) = data?;
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             } else {
-                let key: ChunkHash = key
+                let key: Hash256 = key
                     .chunks_exact(HASH_SIZE)
                     .next()
                     .map_or_else(
@@ -191,7 +191,7 @@ impl ChunkDb {
         Ok(result)
     }
 
-    pub fn get_entry(&self, key: &ChunkHash) -> Result<Option<(RefCount, PathBuf)>> {
+    pub fn get_entry(&self, key: &Hash256) -> Result<Option<(RefCount, PathBuf)>> {
         match self.chunk_map.get(key)? {
             None => Ok(None),
             Some(encrypted_data) => {
@@ -201,14 +201,14 @@ impl ChunkDb {
         }
     }
 
-    pub fn get_ref_count(&self, key: &ChunkHash) -> Result<Option<RefCount>> {
+    pub fn get_ref_count(&self, key: &Hash256) -> Result<Option<RefCount>> {
         match self.get_entry(key)? {
             None => Ok(None),
             Some((ref_count, _file_name)) => Ok(Some(ref_count)),
         }
     }
 
-    pub fn get_file_name(&self, key: &ChunkHash) -> Result<Option<PathBuf>> {
+    pub fn get_file_name(&self, key: &Hash256) -> Result<Option<PathBuf>> {
         match self.get_entry(key)? {
             None => Ok(None),
             Some((_ref_count, file_name)) => Ok(Some(file_name)),
@@ -228,7 +228,7 @@ impl<T: Hashable> Hashable for RcDbEntry<T> {
     fn hash(&self) -> Result<blake3::Hash> {
         self.data.hash()
     }
-    fn keyed_hash(&self, key: &EncKey) -> Result<blake3::Hash> {
+    fn keyed_hash(&self, key: &Key256) -> Result<blake3::Hash> {
         self.data.keyed_hash(key)
     }
 }
@@ -237,8 +237,8 @@ impl<T: Hashable> Hashable for RcDbEntry<T> {
 #[derive(Debug)]
 pub struct RcDb<T: Hashable + Serialize + for<'a> Deserialize<'a>> {
     tree: sled::Tree,
-    data_enc_key: EncKey,
-    data_hash_key: EncKey,
+    data_enc_key: Key256,
+    data_hash_key: Key256,
     entry_type: PhantomData<T>,
 }
 
@@ -254,7 +254,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             }
-            let key: Hash = key
+            let key: Hash256 = key
                 .chunks_exact(HASH_SIZE)
                 .next()
                 .map_or_else(
@@ -265,7 +265,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
 
             // Check data
             let entry = RcDbEntry::<T>::decrypt(&encrypted_data, &self.data_enc_key)?;
-            if key != Hash::from(*entry.data.keyed_hash(&self.data_hash_key)?.as_bytes()) {
+            if key != Hash256::from(*entry.data.keyed_hash(&self.data_hash_key)?.as_bytes()) {
                 return Err(BackrubError::SelfTestError.into());
             }
         }
@@ -273,7 +273,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Creates a new reference counting database from a `sled::Tree` and running a self test
-    pub fn new(tree: sled::Tree, data_enc_key: EncKey, data_hash_key: EncKey) -> Result<RcDb<T>> {
+    pub fn new(tree: sled::Tree, data_enc_key: Key256, data_hash_key: Key256) -> Result<RcDb<T>> {
         let db = RcDb {
             tree,
             data_enc_key,
@@ -293,8 +293,8 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
 
     /// Inserts data into the database
     /// If the same data is already stored the reference count is incremented
-    pub fn insert(&mut self, data: T) -> Result<(RefCount, Hash)> {
-        let key = Hash::from(*data.keyed_hash(&self.data_hash_key)?.as_bytes());
+    pub fn insert(&mut self, data: T) -> Result<(RefCount, Hash256)> {
+        let key = Hash256::from(*data.keyed_hash(&self.data_hash_key)?.as_bytes());
         match self.tree.remove(key)? {
             Some(old) => {
                 let old = RcDbEntry::<T>::decrypt(&old, &self.data_enc_key)?;
@@ -318,7 +318,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
 
     /// Removes an instace of the referenced data from the database.
     /// If the reference count reaches 0 the element will be deleted.
-    pub fn remove(&mut self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+    pub fn remove(&mut self, key: &Hash256) -> Result<Option<(RefCount, T)>> {
         match self.tree.remove(key)? {
             None => Ok(None),
             Some(old) => {
@@ -341,7 +341,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Deletes the referenced entry from the database regardless of the reference count
-    pub fn purge(&mut self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+    pub fn purge(&mut self, key: &Hash256) -> Result<Option<(RefCount, T)>> {
         match self.tree.remove(key)? {
             None => Ok(None),
             Some(old) => {
@@ -352,7 +352,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Gets the current refercence count and data
-    pub fn get_data_db_entry(&self, key: &Hash) -> Result<Option<(RefCount, T)>> {
+    pub fn get_data_db_entry(&self, key: &Hash256) -> Result<Option<(RefCount, T)>> {
         match self.tree.get(key)? {
             None => Ok(None),
             Some(encrypted_data) => {
@@ -363,7 +363,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Gets only the referenced data
-    pub fn get_data(&self, key: &Hash) -> Result<Option<T>> {
+    pub fn get_data(&self, key: &Hash256) -> Result<Option<T>> {
         match self.get_data_db_entry(key)? {
             None => Ok(None),
             Some((_ref_count, data)) => Ok(Some(data)),
@@ -371,7 +371,7 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Gets only the reference count
-    pub fn get_ref_count(&self, key: &Hash) -> Result<Option<RefCount>> {
+    pub fn get_ref_count(&self, key: &Hash256) -> Result<Option<RefCount>> {
         match self.get_data_db_entry(key)? {
             None => Ok(None),
             Some((ref_count, _data)) => Ok(Some(ref_count)),
@@ -379,14 +379,14 @@ impl<T: Clone + Hashable + Serialize + for<'a> Deserialize<'a>> RcDb<T> {
     }
 
     /// Returns a complete in memory representation of the database
-    pub fn get_mappings(&self) -> Result<BTreeMap<Hash, (RefCount, T)>> {
-        let mut result = BTreeMap::<Hash, (RefCount, T)>::new();
+    pub fn get_mappings(&self) -> Result<BTreeMap<Hash256, (RefCount, T)>> {
+        let mut result = BTreeMap::<Hash256, (RefCount, T)>::new();
         for data in self.tree.iter() {
             let (key, encrypted_data) = data?;
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             } else {
-                let hash: Hash = key
+                let hash: Hash256 = key
                     .chunks_exact(HASH_SIZE)
                     .next()
                     .map_or_else(
@@ -413,8 +413,8 @@ impl Encrypt for InodeDbEntry {}
 #[derive(Debug)]
 pub struct InodeDb {
     tree: sled::Tree,
-    inode_enc_key: EncKey,
-    inode_hash_key: EncKey,
+    inode_enc_key: Key256,
+    inode_hash_key: Key256,
 }
 
 impl InodeDb {
@@ -426,7 +426,7 @@ impl InodeDb {
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             }
-            let key: InodeHash = key
+            let key: Hash256 = key
                 .chunks_exact(HASH_SIZE)
                 .next()
                 .map_or_else(
@@ -437,14 +437,14 @@ impl InodeDb {
 
             // Check data
             let entry = InodeDbEntry::decrypt(&encrypted_data, &self.inode_enc_key)?;
-            if key != InodeHash::from(*entry.inode.keyed_hash(&self.inode_hash_key)?.as_bytes()) {
+            if key != Hash256::from(*entry.inode.keyed_hash(&self.inode_hash_key)?.as_bytes()) {
                 return Err(BackrubError::SelfTestError.into());
             }
         }
         Ok(())
     }
 
-    pub fn new(tree: sled::Tree, inode_enc_key: EncKey, inode_hash_key: EncKey) -> Result<InodeDb> {
+    pub fn new(tree: sled::Tree, inode_enc_key: Key256, inode_hash_key: Key256) -> Result<InodeDb> {
         let db = InodeDb {
             tree,
             inode_enc_key,
@@ -458,8 +458,8 @@ impl InodeDb {
         self.tree.len()
     }
 
-    pub fn insert(&mut self, inode: Inode) -> Result<(RefCount, InodeHash)> {
-        let key = InodeHash::from(*inode.keyed_hash(&self.inode_hash_key)?.as_bytes());
+    pub fn insert(&mut self, inode: Inode) -> Result<(RefCount, Hash256)> {
+        let key = Hash256::from(*inode.keyed_hash(&self.inode_hash_key)?.as_bytes());
         match self.tree.remove(key)? {
             Some(old) => {
                 let old = InodeDbEntry::decrypt(&old, &self.inode_enc_key)?;
@@ -484,7 +484,7 @@ impl InodeDb {
         }
     }
 
-    pub fn remove(&mut self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
+    pub fn remove(&mut self, key: &Hash256) -> Result<Option<(RefCount, Inode)>> {
         match self.tree.remove(key)? {
             None => Ok(None),
             Some(old) => {
@@ -506,7 +506,7 @@ impl InodeDb {
         }
     }
 
-    pub fn get_inode_db_entry(&self, key: &InodeHash) -> Result<Option<(RefCount, Inode)>> {
+    pub fn get_inode_db_entry(&self, key: &Hash256) -> Result<Option<(RefCount, Inode)>> {
         match self.tree.get(key)? {
             None => Ok(None),
             Some(encrypted_data) => {
@@ -516,28 +516,28 @@ impl InodeDb {
         }
     }
 
-    pub fn get_inode(&self, key: &InodeHash) -> Result<Option<Inode>> {
+    pub fn get_inode(&self, key: &Hash256) -> Result<Option<Inode>> {
         match self.get_inode_db_entry(key)? {
             None => Ok(None),
             Some((_ref_count, inode)) => Ok(Some(inode)),
         }
     }
 
-    pub fn get_ref_count(&self, key: &InodeHash) -> Result<Option<RefCount>> {
+    pub fn get_ref_count(&self, key: &Hash256) -> Result<Option<RefCount>> {
         match self.get_inode_db_entry(key)? {
             None => Ok(None),
             Some((ref_count, _inode)) => Ok(Some(ref_count)),
         }
     }
 
-    pub fn get_mappings(&self) -> Result<BTreeMap<InodeHash, (RefCount, Inode)>> {
-        let mut result = BTreeMap::<InodeHash, (RefCount, Inode)>::new();
+    pub fn get_mappings(&self) -> Result<BTreeMap<Hash256, (RefCount, Inode)>> {
+        let mut result = BTreeMap::<Hash256, (RefCount, Inode)>::new();
         for data in self.tree.iter() {
             let (key, encrypted_data) = data?;
             if key.len() != HASH_SIZE {
                 return Err(BackrubError::SledKeyLengthError.into());
             } else {
-                let hash: InodeHash = key
+                let hash: Hash256 = key
                     .chunks_exact(HASH_SIZE)
                     .next()
                     .map_or_else(

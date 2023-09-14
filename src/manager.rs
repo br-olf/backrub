@@ -74,7 +74,7 @@ pub struct BackupManager {
     chunk_db: Mutex<ChunkDb>,
     manifest: Manifest,
     keys: CryptoKeys,
-    sig_key: EncKey,
+    sig_key: Key256,
     database: sled::Db,
 }
 
@@ -94,7 +94,7 @@ impl BackupManager {
         )?;
 
         let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
-        let sig_key = EncKey::try_from(sig_key.as_slice())?;
+        let sig_key = Key256::try_from(sig_key.as_slice())?;
 
         let manifest = manifest.verify(&sig_key)?;
 
@@ -148,7 +148,7 @@ impl BackupManager {
 
         // Derive signature key
         let sig_key: Vec<u8> = crypto_root.drain(..KEY_SIZE).collect();
-        let sig_key = EncKey::try_from(sig_key.as_slice())?;
+        let sig_key = Key256::try_from(sig_key.as_slice())?;
 
         // Derive keys
         let key_encryption_keys: Vec<u8> = crypto_root.drain(..CRYPTO_KEYS_SIZE).collect();

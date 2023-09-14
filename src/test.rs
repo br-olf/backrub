@@ -159,15 +159,15 @@ fn test_log2u64() {
 
 #[test]
 fn test_ChunkDb() {
-    let key = EncKey::from(*blake3::hash(b"foobar").as_bytes());
+    let key = Key256::from(*blake3::hash(b"foobar").as_bytes());
     let config = sled::Config::new().temporary(true);
     let db = config.open().unwrap();
 
     let mut cs = ChunkDb::new(db.open_tree(b"test").unwrap(), key).unwrap();
-    let h1 = ChunkHash::from(*blake3::hash(b"foo").as_bytes());
-    let h2 = ChunkHash::from(*blake3::hash(b"bar").as_bytes());
-    let h3 = ChunkHash::from(*blake3::hash(b"baz").as_bytes());
-    let h4 = ChunkHash::from(*blake3::hash(b"foobar").as_bytes());
+    let h1 = Hash256::from(*blake3::hash(b"foo").as_bytes());
+    let h2 = Hash256::from(*blake3::hash(b"bar").as_bytes());
+    let h3 = Hash256::from(*blake3::hash(b"baz").as_bytes());
+    let h4 = Hash256::from(*blake3::hash(b"foobar").as_bytes());
 
     assert_eq!(cs.insert(&h1).unwrap(), (1, PathBuf::from("1.bin")));
     assert_eq!(cs.insert(&h2).unwrap(), (1, PathBuf::from("2.bin")));
