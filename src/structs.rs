@@ -51,8 +51,6 @@ impl AsRef<[u8]> for Hash256 {
     }
 }
 
-
-
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct Key256(pub(crate) [u8; KEY_SIZE]);
 
@@ -150,7 +148,6 @@ impl AsRef<[u8]> for Nonce192 {
         self.0.as_ref()
     }
 }
-
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackupConf {

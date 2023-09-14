@@ -4,7 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use async_std::{fs::File, sync::Mutex};
+use async_std::{
+    fs::{DirEntry, File},
+    sync::Mutex,
+};
 use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
 use futures::executor::block_on;
 use serde::{Deserialize, Serialize};
@@ -236,7 +239,7 @@ impl BackupManager {
     }
 
     /// performs all backup operations for a directory
-    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) -> Result<Vec<Inode>> {
+    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) -> Result<(Directory, Vec<Inode>)> {
         let dir_iter = fs::read_dir(path)?;
 
         let mut result = Vec::<Inode>::new();
@@ -297,4 +300,79 @@ impl BackupManager {
 
         todo!()
     }
+}
+
+use std::sync::Arc;
+
+#[derive(Debug)]
+pub enum TDirEntry {
+    Dir(TDir),
+    Link(TLink),
+    File(TFile),
+}
+
+#[derive(Debug)]
+pub struct TDir {
+    path: PathBuf,
+    meta: fs::Metadata,
+    cont: Vec<Arc<TDirEntry>>,
+}
+
+#[derive(Debug)]
+pub struct TLink {
+    path: PathBuf,
+    meta: fs::Metadata,
+}
+
+#[derive(Debug)]
+pub struct TFile {
+    path: PathBuf,
+    meta: fs::Metadata,
+}
+
+pub fn index_dir(
+    path: &Path,
+) -> Result<(Arc<TDirEntry>, Vec<Arc<TDirEntry>>, Vec<Arc<TDirEntry>>)> {
+    let dir_iter = fs::read_dir(path)?;
+
+    let mut dir_contents = Vec::<Arc<TDirEntry>>::new();
+    let mut all_files = Vec::<Arc<TDirEntry>>::new();
+    let mut all_contents = Vec::<Arc<TDirEntry>>::new();
+
+    for entry in dir_iter {
+        let entry = entry?;
+        let e_meta = entry.metadata()?;
+        let e_path = entry.path();
+
+        if e_meta.is_dir() {
+            let (d, mut a, mut f) = index_dir(&e_path)?;
+            dir_contents.push(d);
+            all_contents.append(&mut a);
+            all_files.append(&mut f);
+        } else if e_meta.is_file() {
+            let e = Arc::from(TDirEntry::File(TFile {
+                path: e_path,
+                meta: e_meta,
+            }));
+            dir_contents.push(e.clone());
+            all_contents.push(e.clone());
+            all_files.push(e);
+        } else if e_meta.is_symlink() {
+            let e = Arc::from(TDirEntry::Link(TLink {
+                path: e_path,
+                meta: e_meta,
+            }));
+            dir_contents.push(e.clone());
+            all_contents.push(e);
+        }
+    }
+
+    let res = Arc::from(TDirEntry::Dir(TDir {
+        path: path.to_path_buf(),
+        meta: fs::metadata(path)?,
+        cont: dir_contents,
+    }));
+
+    all_contents.push(res.clone());
+    Ok((res, all_contents, all_files))
 }

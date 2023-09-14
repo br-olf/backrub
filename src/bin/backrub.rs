@@ -1,5 +1,35 @@
-fn main() {
+use backrub::manager::*;
+use std::path;
+use std::sync::Arc;
+use std::time::Instant;
 
+fn main() {
+    let now = Instant::now();
+    let res = index_dir(&path::Path::new("/home/olaf/Work")).unwrap();
+    let elapsed_time = now.elapsed();
+
+    let (dir, all, files) = res;
+    println!("OK\n\n\n{}\n{}\n", Arc::<TDirEntry>::strong_count(&dir), Arc::<TDirEntry>::weak_count(&dir));
+    println!("all entries: {}\nfiles: {}\n", all.len(), files.len());
+
+    let mut max = 0;
+    for e in all {
+        let l = Arc::<TDirEntry>::strong_count(&e);
+        if l > max {
+            max = l;
+        }
+    }
+    println!("{}\n\n", max);
+
+
+println!("Running slow_function() took {} milliseconds.", elapsed_time.as_millis());
+
+
+
+    let testvec = vec![1,2,3,4];
+    let testarc: Arc<[i32]> = testvec.into();
+
+    println!("testarc: {:?}", testarc);
 }
 
 
