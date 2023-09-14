@@ -15,12 +15,13 @@ pub fn log2u64(x: u64) -> Option<u64> {
 
 /// Calculate chunks, chunk hashes and a file-hash of mmaped data.
 /// Returns a [Vec] of `(Chunk, ChunkHash)` tuples and the FileHash.
+use std::sync::Arc;
 pub fn chunk_and_hash(
     mmap: &Mmap,
     conf: &ChunkerConf,
     chunk_hash_key: &Key256,
     file_hash_key: &Key256,
-) -> Result<(Vec<(Vec<u8>, blake3::Hash)>, blake3::Hash)> {
+) -> Result<(Vec<(Arc<[u8]>, blake3::Hash)>, blake3::Hash)> {
     let cdc = fastcdc::FastCdc::new(
         &GEAR_64,
         conf.minimum_chunk_size,
@@ -29,11 +30,11 @@ pub fn chunk_and_hash(
     );
     let chunk_iter = fastcdc::FastCdcIncr::from(&cdc);
 
-    let chunks: Vec<(Vec<u8>, blake3::Hash)> = chunk_iter
+    let chunks: Vec<(Arc<[u8]>, blake3::Hash)> = chunk_iter
         .iter_slices(&mmap[..])
         .map(|chunk| {
             (
-                chunk.to_vec(),
+                Arc::<[u8]>::from(chunk),
                 chunk.keyed_hash(chunk_hash_key).expect("never fail"),
             )
         })
