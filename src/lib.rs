@@ -35,6 +35,14 @@ pub fn convert_4u64_to_32u8(input: &[u64; 4]) -> &[u8; 32] {
     unsafe { std::mem::transmute::<&[u64; 4], &[u8; 32]>(input) }
 }
 
+pub fn convert_8u8_to_1u64(input: &[u8; 8]) -> &[u64; 1] {
+    unsafe { std::mem::transmute::<&[u8; 8], &[u64; 1]>(input) }
+}
+
+pub fn convert_1u64_to_8u8(input: &[u64; 1]) -> &[u8; 8] {
+    unsafe { std::mem::transmute::<&[u64; 1], &[u8; 8]>(input) }
+}
+
 fn crawl_dir(path: &path::Path, follow_links: bool) -> Result<Vec<path::PathBuf>, io::Error> {
     if path.is_file() {
         return Ok(vec![path.to_path_buf()]);

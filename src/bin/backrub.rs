@@ -1,12 +1,92 @@
-use backrub::manager::*;
-use std::io::stdin;
-use std::path;
-use std::sync::Arc;
-use std::time::Instant;
-use tempfile;
-
 fn main() {
+    use blake3;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use backrub::*;
+
+    struct Myhasher{
+        state: u64,
+        filled: u8,
+    };
+
+    impl Myhasher{
+        pub fn new() -> Self {
+            return Myhasher { state: 0, filled: 7 }
+        }
+    }
+    impl Hasher for Myhasher{
+        fn finish(&self) -> u64 {
+            return self.state;
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.filled = (self.filled+1) % 8;
+                let mut mask: u64 = (*byte).into();
+                mask = mask << 8*self.filled;
+                self.state = self.state ^ mask;
+            }
+        }
+    }
+
+
+
+
+
+    struct b3hash(blake3::Hash);
+
+    impl Hash for b3hash{
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            //let mystate = self.0.as_bytes();
+            //state.write(mystate);
+            self.0.hash(state);
+        }
+    }
+
+    use std::time::Instant;
+    let N = 100 as u8;
+    let M = 100000 as usize;
+
+    let mut values = Vec::<u64>::with_capacity(N as usize *M);
+    let now = Instant::now();
+    for _ in 0..M{
+    for i in 0u8..N {
+
+        let mut hasher = Myhasher::new();
+        let test = b3hash(blake3::hash(&[i]));
+        test.hash(&mut hasher);
+        values.push(hasher.finish());
+    }
+    }
+    let elapsed = now.elapsed();
+    println!("putting {} elements took {}ms", N as usize *M, elapsed.as_millis());
+
+    let mut values = Vec::<u64>::with_capacity(N as usize *M);
+    let now = Instant::now();
+    for _ in 0..M{
+    for i in 0u8..N {
+
+        let mut hasher = DefaultHasher::new();
+        let test = b3hash(blake3::hash(&[i]));
+        test.hash(&mut hasher);
+        values.push(hasher.finish());
+    }
+    }
+    let elapsed = now.elapsed();
+    println!("putting {} elements took {}ms", N as usize *M, elapsed.as_millis());
+}
+
+
+fn main3() {
+
+    use backrub::manager::*;
+    use std::io::stdin;
+    use std::path;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tempfile;
     use sanakirja::*;
+
     let dir = tempfile::tempdir().unwrap();
     println!("{:?}", dir);
     let path = dir.path().join("db");
@@ -64,6 +144,13 @@ fn main() {
 }
 
 fn main2() {
+    use backrub::manager::*;
+    use std::io::stdin;
+    use std::path;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tempfile;
+
     let now = Instant::now();
     let res = index_dir(&path::Path::new("/home/olaf/Work")).unwrap();
     let elapsed_time = now.elapsed();
