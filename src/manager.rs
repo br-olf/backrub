@@ -230,7 +230,7 @@ impl BackupManager {
             return Err(BackrubError::BackupRootMustBeDir(path.to_path_buf()).into());
         }
 
-        self.backup_dir(path, conf);
+        self.backup_dir(path, conf)?;
 
         todo!("create backup db entry")
     }
@@ -333,24 +333,23 @@ pub enum TDirEntry {
     Link(TLink),
     File(TFile),
 }
-
 #[derive(Debug)]
 pub struct TDir {
-    path: PathBuf,
-    meta: fs::Metadata,
-    cont: Vec<Arc<TDirEntry>>,
+    pub path: PathBuf,
+    pub meta: fs::Metadata,
+    pub cont: Vec<Arc<TDirEntry>>,
 }
 
 #[derive(Debug)]
 pub struct TLink {
-    path: PathBuf,
-    meta: fs::Metadata,
+    pub path: PathBuf,
+    pub meta: fs::Metadata,
 }
 
 #[derive(Debug)]
 pub struct TFile {
-    path: PathBuf,
-    meta: fs::Metadata,
+    pub path: PathBuf,
+    pub meta: fs::Metadata,
 }
 
 pub fn index_dir(

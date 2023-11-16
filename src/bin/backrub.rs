@@ -1,3 +1,5 @@
+#![allow(unused, unused_imports, non_snake_case, non_camel_case_types)]
+
 fn main() {
     use blake3;
     use std::collections::hash_map::DefaultHasher;
@@ -127,7 +129,7 @@ fn main3() {
     let elapsed = now.elapsed();
     println!("full table scan took {}ms",elapsed.as_millis());
 
-
+    #[allow(non_snake_case)]
     let N = 1000u64;
     for i in 0..N {
         println!("{}",i);
