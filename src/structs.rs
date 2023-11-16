@@ -32,6 +32,11 @@ impl From<[u8; HASH_SIZE]> for Hash256 {
     }
 }
 
+impl From<&[u8; HASH_SIZE]> for Hash256 {
+    fn from(array: &[u8; HASH_SIZE]) -> Self {
+        Hash256(*array)
+    }
+}
 impl TryFrom<&[u8]> for Hash256 {
     type Error = std::array::TryFromSliceError;
     fn try_from(array: &[u8]) -> std::result::Result<Self, std::array::TryFromSliceError> {
@@ -178,6 +183,8 @@ pub struct Metadata {
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
+    pub atime: i64,
+    pub atime_ns: i64,
     pub mtime: i64,
     pub mtime_ns: i64,
     pub ctime: i64,
@@ -190,6 +197,8 @@ impl From<std::fs::Metadata> for Metadata {
             mode: value.mode(),
             uid: value.uid(),
             gid: value.gid(),
+            atime: value.atime(),
+            atime_ns: value.atime_nsec(),
             mtime: value.mtime(),
             mtime_ns: value.mtime_nsec(),
             ctime: value.ctime(),

@@ -21,7 +21,7 @@ pub fn chunk_and_hash(
     conf: &ChunkerConf,
     chunk_hash_key: &Key256,
     file_hash_key: &Key256,
-) -> Result<(Vec<(Arc<[u8]>, blake3::Hash)>, blake3::Hash)> {
+) -> Result<(Arc<[(Arc<[u8]>, blake3::Hash)]>, blake3::Hash)> {
     let cdc = fastcdc::FastCdc::new(
         &GEAR_64,
         conf.minimum_chunk_size,
@@ -40,5 +40,5 @@ pub fn chunk_and_hash(
         })
         .collect();
 
-    Ok((chunks, (&mmap[..]).keyed_hash(file_hash_key)?))
+    Ok((chunks.into(), (&mmap[..]).keyed_hash(file_hash_key)?))
 }

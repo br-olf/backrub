@@ -73,8 +73,8 @@ impl Default for BackupManagerConf {
 
 #[derive(Debug)]
 pub struct BackupManager {
-    inode_db: Mutex<InodeDb>,
-    chunk_db: Mutex<ChunkDb>,
+    inode_db: InodeDb,
+    chunk_db: ChunkDb,
     manifest: Manifest,
     keys: CryptoKeys,
     sig_key: Key256,
@@ -128,8 +128,8 @@ impl BackupManager {
         )?;
 
         let manager = BackupManager {
-            inode_db: Mutex::new(inode_db),
-            chunk_db: Mutex::new(chunk_db),
+            inode_db: inode_db,
+            chunk_db: chunk_db,
             manifest,
             keys,
             sig_key,
@@ -190,8 +190,8 @@ impl BackupManager {
 
         // create BackupManager
         let manager = BackupManager {
-            inode_db: Mutex::new(inode_db),
-            chunk_db: Mutex::new(chunk_db),
+            inode_db: inode_db,
+            chunk_db: chunk_db,
             manifest,
             keys,
             sig_key,
@@ -205,14 +205,11 @@ impl BackupManager {
     }
 
     fn write_manifet(&self, manifest_path: &Path) -> Result<()> {
-        // Lock mutex
-        let chunk_db = block_on(self.chunk_db.lock());
-
         // copy manifest
         let mut manifest = self.manifest.clone();
 
         // update manifest
-        manifest.chunk_db_state = chunk_db.state.clone();
+        manifest.chunk_db_state = self.chunk_db.state.clone();
 
         // sign manifest
         let signed = manifest.sign(&self.sig_key)?;
@@ -239,7 +236,7 @@ impl BackupManager {
     }
 
     /// performs all backup operations for a directory
-    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) -> Result<(Directory, Vec<Inode>)> {
+    fn backup_dir(&mut self, path: &Path, conf: &BackupConf) -> Result<(Vec<Inode>)> {
         let dir_iter = fs::read_dir(path)?;
 
         let mut result = Vec::<Inode>::new();
@@ -249,7 +246,7 @@ impl BackupManager {
             meta: fs::Metadata,
         }
 
-        let mut dirs = Vec::<DEntry>::new();
+        let mut dirs = Vec::<PathBuf>::new();
         let mut files = Vec::<DEntry>::new();
         let mut slinks = Vec::<DEntry>::new();
 
@@ -259,10 +256,7 @@ impl BackupManager {
             let r_path = entry.path();
 
             if e_meta.is_dir() {
-                dirs.push(DEntry {
-                    path: r_path,
-                    meta: e_meta,
-                })
+                dirs.push(r_path)
             } else if e_meta.is_file() {
                 files.push(DEntry {
                     path: r_path,
@@ -288,16 +282,45 @@ impl BackupManager {
         use std::fs::File;
 
         for file in files {
-            let f = File::open(file.path).unwrap();
+            let f = File::open(file.path.clone()).unwrap();
             let mmap = unsafe { Mmap::map(&f).unwrap() };
-            let res = chunk_and_hash(
+            match chunk_and_hash(
                 &mmap,
                 &self.manifest.chunker_conf,
                 &self.keys.chunk_hash_key,
                 &self.keys.inode_hash_key,
-            );
+            ){
+                Ok(res) => {
+                    let (chunks, hash) = res;
+                    result.push(Inode::File(structs::File{
+                        relpath: file.path.clone(),
+                        metadata: structs::Metadata::from(file.meta),
+                        file_hash: Hash256::from(hash.as_bytes()),
+                        chunk_ids: chunks.into_iter().map(|(c, h)| Hash256::from(h.as_bytes())).collect(),
+                    }));
+
+                    for (d, h) in chunks.into_iter(){
+                        match self.chunk_db.insert(&Hash256::from(h.as_bytes())) {
+                            Ok((count, path)) => {
+                                if count == 1 {
+                                    todo!("create chunk file on {:?} with data {:?}",path,d)
+                                }
+                            }
+
+                            Err(e) => { todo!("report error: {:?}", e) }
+                        }
+                    }
+                }
+                Err(e) => { todo!("report error: {:?}",e) }
+            }
         }
 
+        for dir in dirs{
+            match self.backup_dir(dir.as_path(), conf) {
+                Ok(mut inodes) => { result.append(&mut inodes) }
+                Err(e) => { todo!("report error: {:?}",e) }
+            }
+        }
         todo!()
     }
 }
